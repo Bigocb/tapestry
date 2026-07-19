@@ -18,15 +18,23 @@ from sqlalchemy.sql import func
 from sqlalchemy.types import TypeDecorator
 import uuid
 
-# Handle database-specific types
-_using_postgres = True
-try:
-    from sqlalchemy.dialects.postgresql import JSONB as PG_JSONB
 
-    STRUCTURED_CONTENT_TYPE = PG_JSONB
-except ImportError:
-    STRUCTURED_CONTENT_TYPE = JSON
-    _using_postgres = False
+# Handle database-specific types (JSON vs JSONB)
+class DBJSON(TypeDecorator):
+    """JSON type that uses JSONB on Postgres, JSON on SQLite."""
+
+    impl = JSON
+    cache_ok = True
+
+    def load_dialect_impl(self, dialect):
+        if dialect.name == "postgresql":
+            from sqlalchemy.dialects.postgresql import JSONB
+
+            return dialect.type_descriptor(JSONB())
+        return dialect.type_descriptor(JSON())
+
+
+STRUCTURED_CONTENT_TYPE = DBJSON()
 
 
 # UUID type that works with SQLite (uses String(36))
@@ -42,6 +50,24 @@ class GUID(TypeDecorator):
             return dialect.type_descriptor(String(36))
         return dialect.type_descriptor(UUID())
 
+    def process_bind_param(self, value, dialect):
+        """Convert UUID to string for SQLite."""
+        if value is None:
+            return value
+        if dialect.name == "sqlite":
+            return str(value)
+        return value
+
+    def process_result_value(self, value, dialect):
+        """Convert string back to UUID."""
+        if value is None:
+            return value
+        from uuid import UUID as UUID_TYPE
+
+        if isinstance(value, UUID_TYPE):
+            return value
+        return UUID_TYPE(value)
+
 
 Base = declarative_base()
 
@@ -49,7 +75,7 @@ Base = declarative_base()
 class User(Base):
     __tablename__ = "users"
 
-    id = Column(GUID(), primary_key=True, default=uuid.uuid4)
+    id = Column(GUID(), primary_key=True, default=lambda: str(uuid.uuid4()))
     username = Column(String(255), unique=True, nullable=False, index=True)
     email = Column(String(255), unique=True, nullable=False, index=True)
     password_hash = Column(String(255), nullable=False)
@@ -71,10 +97,8 @@ class User(Base):
 class Memory(Base):
     __tablename__ = "memories"
 
-    id = Column(GUID(), primary_key=True, default=uuid.uuid4)
-    user_id = Column(
-        GUID(), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
-    )
+    id = Column(GUID(), primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id = Column(GUID(), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
 
     # Input & Raw Data
     raw_input = Column(Text, nullable=False)
@@ -89,10 +113,8 @@ class Memory(Base):
     )  # Store as JSON string: can be NULL until enriched
 
     # Metadata
-    # Note: ARRAY is Postgres-specific; SQLite will store as JSON
-    tags = Column(
-        ARRAY(String) if _using_postgres else JSON, default=list, nullable=False
-    )
+    # Note: Use DBJSON for cross-database compatibility
+    tags = Column(DBJSON(), default=list, nullable=False)
     mood = Column(String(50), nullable=True)
     importance_level = Column(Integer, default=5, nullable=False)  # 1-10
 
@@ -101,10 +123,8 @@ class Memory(Base):
     # States: raw → capturing → refined → enriching → enriched → ready
 
     # Relationships
-    # Note: ARRAY is Postgres-specific; SQLite will store as JSON
-    related_memory_ids = Column(
-        ARRAY(UUID) if _using_postgres else JSON, default=list, nullable=False
-    )
+    # Note: Use DBJSON for cross-database compatibility
+    related_memory_ids = Column(DBJSON(), default=list, nullable=False)
 
     # Timestamps
     created_at = Column(TIMESTAMP, server_default=func.now(), nullable=False)
@@ -129,10 +149,8 @@ class Memory(Base):
 class Entity(Base):
     __tablename__ = "entities"
 
-    id = Column(GUID(), primary_key=True, default=uuid.uuid4)
-    user_id = Column(
-        GUID(), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
-    )
+    id = Column(GUID(), primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id = Column(GUID(), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     memory_id = Column(
         GUID(),
         ForeignKey("memories.id", ondelete="CASCADE"),
@@ -161,14 +179,12 @@ class Entity(Base):
 class Story(Base):
     __tablename__ = "stories"
 
-    id = Column(GUID(), primary_key=True, default=uuid.uuid4)
-    user_id = Column(
-        GUID(), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
-    )
+    id = Column(GUID(), primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id = Column(GUID(), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
 
     title = Column(String(255), nullable=False)
     narrative = Column(Text, nullable=False)
-    memory_ids = Column(ARRAY(UUID) if _using_postgres else JSON, nullable=False)
+    memory_ids = Column(DBJSON(), nullable=False)
 
     story_type = Column(
         String(50), nullable=True
@@ -189,7 +205,7 @@ class Story(Base):
 class JobStatus(Base):
     __tablename__ = "job_status"
 
-    id = Column(GUID(), primary_key=True, default=uuid.uuid4)
+    id = Column(GUID(), primary_key=True, default=lambda: str(uuid.uuid4()))
     user_id = Column(GUID(), nullable=False)
     memory_id = Column(GUID(), nullable=True)
 

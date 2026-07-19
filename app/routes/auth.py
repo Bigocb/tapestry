@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from uuid import uuid4
+from pydantic import BaseModel
 
 from app.db import User, get_db
 from app.models.schemas import UserCreate, UserLogin, UserResponse, TokenResponse
@@ -39,7 +40,7 @@ async def register(user_create: UserCreate, db: AsyncSession = Depends(get_db)):
 
     # Create new user
     user = User(
-        id=uuid4(),
+        id=str(uuid4()),  # Convert to string for cross-DB compatibility
         username=user_create.username,
         email=user_create.email,
         password_hash=hash_password(user_create.password),
@@ -85,12 +86,18 @@ async def login(user_login: UserLogin, db: AsyncSession = Depends(get_db)):
     return TokenResponse(access_token=access_token)
 
 
+class TokenRefreshRequest(BaseModel):
+    """Token refresh request."""
+
+    token: str
+
+
 @router.post("/refresh", response_model=TokenResponse)
-async def refresh_token(token: str, db: AsyncSession = Depends(get_db)):
+async def refresh_token(req: TokenRefreshRequest, db: AsyncSession = Depends(get_db)):
     """Refresh an expired token (returns new token if user exists)."""
     # For now, we decode without checking expiration for refresh endpoint
     # In production, you might use a separate refresh token mechanism
-    token_data = decode_access_token(token)
+    token_data = decode_access_token(req.token)
 
     if not token_data:
         raise HTTPException(
