@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 
 # Import routes
-from app.routes import auth
+from app.routes import auth, memories
 
 tags_metadata = [
     {
@@ -80,6 +80,7 @@ async def health_check():
 
 # Include routes
 app.include_router(auth.router, prefix="/api", tags=["auth"])
+app.include_router(memories.router, prefix="/api", tags=["memories"])
 
 
 if __name__ == "__main__":

@@ -111,7 +111,9 @@ class MemoryCapture(BaseModel):
     """Input for capturing a new memory."""
 
     raw_input: str = Field(
-        ..., description="Raw memory text (from voice transcription, text, or form)"
+        ...,
+        min_length=1,
+        description="Raw memory text (from voice transcription, text, or form)",
     )
     input_type: str = Field(..., description="'voice', 'text', or 'form'")
 
