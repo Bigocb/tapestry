@@ -12,6 +12,7 @@ import uuid
 
 from app.db import get_db, Memory, User
 from app.db.connection import engine
+from app.agents.capture import structure_memory
 from app.models.schemas import MemoryCapture, MemoryResponse, MemoryTextCapture, MemoryFormCapture
 from app.dependencies import get_current_user
 
@@ -111,6 +112,50 @@ async def _create_memory(
     return memory
 
 
+async def _structure_and_update_memory(
+    db: AsyncSession,
+    memory: Memory,
+    override_mood: str | None = None,
+    override_tags: list[str] | None = None,
+    override_importance: int | None = None,
+    override_people: list[str] | None = None,
+    override_location: str | None = None,
+) -> None:
+    """Run the Capture Agent and store the result on the memory row.
+
+    User-provided metadata wins over agent output. The row is refreshed before
+    this call, so the session already contains the latest state.
+    """
+    structured = await structure_memory(memory.raw_input)
+
+    # User-provided values take precedence.
+    if override_mood:
+        structured.mood = override_mood
+    if override_importance is not None:
+        structured.importance_level = override_importance
+    if override_tags:
+        structured.initial_tags = override_tags
+
+    memory.structured_content = structured.model_dump()
+
+    # Update denormalized top-level fields for querying/filtering.
+    memory.mood = structured.mood
+    memory.importance_level = structured.importance_level
+    memory.tags = structured.initial_tags
+
+    # Merge form-only fields (people, location) into structured_content.
+    existing = memory.structured_content or {}
+    if override_people:
+        existing["people"] = override_people
+    if override_location:
+        existing["location"] = override_location
+    memory.structured_content = existing
+
+    memory.processing_state = "capturing"
+    await db.commit()
+    await db.refresh(memory)
+
+
 @router.post(
     "/memories/capture",
     response_model=MemoryResponse,
@@ -163,6 +208,7 @@ async def capture_text_memory(
         raw_input=capture.raw_input,
         input_type="text",
     )
+    await _structure_and_update_memory(db, memory)
     background_tasks.add_task(_schedule_refinement, str(memory.id))
     return _memory_response(memory)
 
@@ -200,6 +246,7 @@ async def capture_voice_memory(
         raw_input=transcription,
         input_type="voice",
     )
+    await _structure_and_update_memory(db, memory)
     background_tasks.add_task(_schedule_refinement, str(memory.id))
     return _memory_response(memory)
 
@@ -237,15 +284,14 @@ async def capture_form_memory(
         importance_level=capture.importance_level,
     )
 
-    # Store additional structured fields in the memory record. Form fields like
-    # people and location are kept inside structured_content for now.
-    memory.structured_content = {
-        "people": capture.people,
-        "location": capture.location,
-        "importance_level": capture.importance_level,
-    }
-    await db.commit()
-    await db.refresh(memory)
-
+    await _structure_and_update_memory(
+        db=db,
+        memory=memory,
+        override_mood=capture.mood,
+        override_tags=capture.tags,
+        override_importance=capture.importance_level,
+        override_people=capture.people,
+        override_location=capture.location,
+    )
     background_tasks.add_task(_schedule_refinement, str(memory.id))
     return _memory_response(memory)

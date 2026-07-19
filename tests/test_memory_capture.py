@@ -21,7 +21,7 @@ from uuid import UUID
 from app.main import app
 from app.db import Base, User, Memory, get_db
 from app.security import hash_password
-from app.models.schemas import MemoryCapture, MemoryResponse
+from app.models.schemas import MemoryCapture, MemoryResponse, StructuredMemory, EntityData
 
 
 # Setup test database
@@ -103,6 +103,23 @@ def setup_users(test_db):
 
 
 @pytest.fixture
+def fake_structure_memory(monkeypatch):
+    """Replace the Capture Agent with a deterministic stub for all tests."""
+
+    async def _fake(raw_input: str):
+        return StructuredMemory(
+            title="Structured: " + raw_input[:50],
+            summary=raw_input,
+            entities=[EntityData(type="concept", value="test")],
+            mood="neutral",
+            importance_level=5,
+            initial_tags=["test"],
+        )
+
+    monkeypatch.setattr("app.routes.memories.structure_memory", _fake)
+
+
+@pytest.fixture
 def get_auth_token(client):
     """Get JWT token for a user."""
 
@@ -121,7 +138,7 @@ class TestMemoryCaptureVoiceEndpoint:
 
     @pytest.mark.asyncio
     async def test_capture_voice_endpoint_with_audio_file(
-        self, client, setup_users, get_auth_token, monkeypatch
+        self, client, setup_users, get_auth_token, monkeypatch, fake_structure_memory
     ):
         """Voice capture endpoint accepts an audio file and stores transcription."""
         user1, _ = await setup_users()
@@ -147,7 +164,7 @@ class TestMemoryCaptureVoiceEndpoint:
         assert data["user_id"] == str(user1.id)
         assert data["raw_input"] == "Went for a run this morning and felt great."
         assert data["input_type"] == "voice"
-        assert data["processing_state"] == "raw"
+        assert data["processing_state"] == "capturing"
 
 
 class TestMemoryCaptureFormEndpoint:
@@ -155,9 +172,9 @@ class TestMemoryCaptureFormEndpoint:
 
     @pytest.mark.asyncio
     async def test_capture_form_endpoint_creates_structured_memory(
-        self, client, setup_users, get_auth_token
+        self, client, setup_users, get_auth_token, fake_structure_memory
     ):
-        """Form capture endpoint stores structured fields and state='raw'."""
+        """Form capture endpoint stores structured fields and state='capturing'."""
         user1, _ = await setup_users()
         token = get_auth_token("alice", "password123")
 
@@ -182,7 +199,7 @@ class TestMemoryCaptureFormEndpoint:
         assert data["mood"] == "accomplished"
         assert data["tags"] == ["work", "planning"]
         assert data["importance_level"] == 8
-        assert data["processing_state"] == "raw"
+        assert data["processing_state"] == "capturing"
 
 
 class TestMemoryCaptureEndpoint:
@@ -225,8 +242,8 @@ class TestMemoryCaptureTextEndpoint:
     """Test /api/memories/capture/text endpoint (Issue 4)."""
 
     @pytest.mark.asyncio
-    async def test_capture_text_endpoint_creates_memory(self, client, setup_users, get_auth_token):
-        """Text capture endpoint creates a memory with state='raw'."""
+    async def test_capture_text_endpoint_creates_memory(self, client, setup_users, get_auth_token, fake_structure_memory):
+        """Text capture endpoint creates a memory with state='capturing'."""
         user1, _ = await setup_users()
         token = get_auth_token("alice", "password123")
 
@@ -241,12 +258,16 @@ class TestMemoryCaptureTextEndpoint:
         assert data["user_id"] == str(user1.id)
         assert data["raw_input"] == "Met with Sarah downtown to discuss her new role."
         assert data["input_type"] == "text"
-        assert data["processing_state"] == "raw"
+        assert data["processing_state"] == "capturing"
         assert isinstance(data["created_at"], str)
+        # Structured content is produced by the Capture Agent.
+        assert data["structured_content"] is not None
+        assert data["mood"] == "neutral"
+        assert data["tags"] == ["test"]
 
     @pytest.mark.asyncio
     async def test_capture_text_schedules_refinement_task(
-        self, client, test_db, setup_users, get_auth_token, monkeypatch
+        self, client, test_db, setup_users, get_auth_token, monkeypatch, fake_structure_memory
     ):
         """After text capture, a background task transitions state to 'refined'."""
         from sqlalchemy import select
