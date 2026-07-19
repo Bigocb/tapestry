@@ -108,4 +108,5 @@ See `.env.example` for the full template.
 | Timeline & insights routes | `app/models/schemas.py` (TimelineQuery, InsightsResponse) | Only schemas defined; no route code yet |
 | AI agents | `app/agents/__init__.py` | Empty module; agents planned in ISSUES.md Issues 5-9 |
 | Frontend | `ARCHITECTURE.md` | React/Next.js planned; no code in repo |
+| Wiki viewer | `app/routes/wiki.py` | Basic read-only OpenWiki browser available at `/api/wiki` |
 | Deployment config | `DB_SETUP.md` | Render deployment described but no config files present |

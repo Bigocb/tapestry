@@ -87,6 +87,7 @@ Each agent is intended to run as a background job tracked in the `job_status` ta
 | `app/security.py` | JWT creation/verification, password hashing |
 | `app/routes/auth.py` | Auth endpoints (register, login, refresh) |
 | `app/routes/memories.py` | Memory capture endpoint |
+| `app/routes/wiki.py` | OpenWiki viewer endpoints (`/api/wiki`) |
 | `app/db/connection.py` | Async engine and session factory |
 | `app/db/models.py` | SQLAlchemy ORM models |
 | `app/models/schemas.py` | Pydantic v2 schemas for all domains |
