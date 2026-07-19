@@ -13,6 +13,7 @@ import uuid
 from app.db import get_db, Memory, User
 from app.db.connection import engine
 from app.agents.capture import structure_memory
+from app.agents.refinement import refine_memory
 from app.models.schemas import MemoryCapture, MemoryResponse, MemoryTextCapture, MemoryFormCapture
 from app.dependencies import get_current_user
 
@@ -36,11 +37,40 @@ def get_background_session_factory() -> async_sessionmaker:
     return BackgroundSessionLocal
 
 
-async def _schedule_refinement(memory_id: str) -> None:
-    """Background task: run the refinement step for a captured memory.
+async def _fetch_recent_memories(db: AsyncSession, user_id: str, exclude_memory_id: str, limit: int = 5) -> list[dict]:
+    """Fetch the user's most recent memories (excluding the given one) as context."""
+    from sqlalchemy import desc
 
-    This is a stub for Issue 6 (Refinement Agent). For now it marks the memory
-    as 'refined' so the async pipeline path is wired end-to-end.
+    stmt = (
+        select(Memory)
+        .where(Memory.user_id == user_id)
+        .where(Memory.id != exclude_memory_id)
+        .order_by(desc(Memory.created_at))
+        .limit(limit)
+    )
+    result = await db.execute(stmt)
+    memories = result.scalars().all()
+
+    context = []
+    for mem in memories:
+        content = mem.structured_content or {}
+        context.append(
+            {
+                "title": content.get("title", "Untitled") if isinstance(content, dict) else "Untitled",
+                "summary": content.get("summary", "") if isinstance(content, dict) else "",
+                "entities": content.get("entities", []) if isinstance(content, dict) else [],
+                "created_at": mem.created_at.isoformat() if mem.created_at else None,
+            }
+        )
+    return context
+
+
+async def _schedule_refinement(memory_id: str) -> None:
+    """Background task: run the Refinement Agent and update the memory record.
+
+    Loads the memory, fetches recent context memories, calls the Refinement Agent,
+    and stores the refined StructuredMemory. On failure, marks the state as
+    'refined_failed' so the issue is observable.
     """
     session_factory = get_background_session_factory()
     async with session_factory() as db:
@@ -50,8 +80,27 @@ async def _schedule_refinement(memory_id: str) -> None:
         if memory is None:
             return
 
-        memory.processing_state = "refined"
-        await db.commit()
+        try:
+            recent_memories = await _fetch_recent_memories(
+                db=db,
+                user_id=str(memory.user_id),
+                exclude_memory_id=str(memory.id),
+            )
+            refined = await refine_memory(
+                raw_input=memory.raw_input,
+                structured_content=memory.structured_content or {},
+                recent_memories=recent_memories,
+            )
+
+            memory.structured_content = refined.model_dump()
+            memory.mood = refined.mood
+            memory.importance_level = refined.importance_level
+            memory.tags = refined.initial_tags
+            memory.processing_state = "refined"
+            await db.commit()
+        except Exception:
+            memory.processing_state = "refined_failed"
+            await db.commit()
 
 
 async def _transcribe_audio(audio_bytes: bytes) -> str:
