@@ -1,7 +1,7 @@
 """Pydantic schemas for MEMIND API and data validation."""
 
 from pydantic import BaseModel, Field, EmailStr, field_validator
-from typing import Optional, List
+from typing import Optional, List, Union
 from datetime import datetime
 from uuid import UUID
 import re
@@ -133,7 +133,7 @@ class MemoryResponse(BaseModel):
     user_id: UUID
     raw_input: str
     input_type: str
-    structured_content: Optional[StructuredMemory] = None
+    structured_content: Optional[Union[StructuredMemory, dict]] = None
     tags: List[str] = Field(default_factory=list)
     mood: Optional[str] = None
     importance_level: int = Field(default=5, ge=1, le=10)
@@ -144,6 +144,31 @@ class MemoryResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class MemoryTextCapture(BaseModel):
+    """Text-only memory capture request."""
+
+    raw_input: str = Field(
+        ...,
+        min_length=1,
+        description="Raw memory text from the user.",
+    )
+
+
+class MemoryFormCapture(BaseModel):
+    """Structured form-based memory capture request."""
+
+    raw_input: str = Field(
+        ...,
+        min_length=1,
+        description="Raw memory text from the user.",
+    )
+    mood: Optional[str] = Field(None, description="Mood associated with the memory")
+    tags: List[str] = Field(default_factory=list, description="Initial tags")
+    people: List[str] = Field(default_factory=list, description="People mentioned")
+    location: Optional[str] = Field(None, description="Location of the memory")
+    importance_level: int = Field(default=5, ge=1, le=10)
 
 
 class MemoryUpdate(BaseModel):

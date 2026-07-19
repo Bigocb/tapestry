@@ -46,12 +46,28 @@ async def test_db():
 @pytest.fixture
 def client(test_db):
     """FastAPI test client with overridden database dependency."""
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+    from app.routes import memories
 
     async def override_get_db():
         yield test_db
 
+    test_factory = async_sessionmaker(
+        bind=test_db.bind,
+        class_=type(test_db),
+        expire_on_commit=False,
+        autoflush=False,
+    )
+    original_factory = memories.BackgroundSessionLocal
+    memories.BackgroundSessionLocal = test_factory
+
     app.dependency_overrides[get_db] = override_get_db
-    return TestClient(app)
+
+    yield TestClient(app)
+
+    # Restore original factory after test.
+    memories.BackgroundSessionLocal = original_factory
+    app.dependency_overrides.pop(get_db, None)
 
 
 @pytest.fixture
@@ -100,6 +116,75 @@ def get_auth_token(client):
     return _get_token
 
 
+class TestMemoryCaptureVoiceEndpoint:
+    """Test /api/memories/capture/voice endpoint (Issue 4)."""
+
+    @pytest.mark.asyncio
+    async def test_capture_voice_endpoint_with_audio_file(
+        self, client, setup_users, get_auth_token, monkeypatch
+    ):
+        """Voice capture endpoint accepts an audio file and stores transcription."""
+        user1, _ = await setup_users()
+        token = get_auth_token("alice", "password123")
+
+        # Mock transcription service to avoid calling Ollama in tests.
+        async def fake_transcribe(audio_bytes: bytes) -> str:
+            return "Went for a run this morning and felt great."
+
+        from app import routes
+        monkeypatch.setattr(
+            routes.memories, "_transcribe_audio", fake_transcribe
+        )
+
+        response = client.post(
+            "/api/memories/capture/voice",
+            files={"audio": ("morning_run.mp3", b"fake-audio-bytes", "audio/mpeg")},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        assert response.status_code == 201
+        data = response.json()
+        assert data["user_id"] == str(user1.id)
+        assert data["raw_input"] == "Went for a run this morning and felt great."
+        assert data["input_type"] == "voice"
+        assert data["processing_state"] == "raw"
+
+
+class TestMemoryCaptureFormEndpoint:
+    """Test /api/memories/capture/form endpoint (Issue 4)."""
+
+    @pytest.mark.asyncio
+    async def test_capture_form_endpoint_creates_structured_memory(
+        self, client, setup_users, get_auth_token
+    ):
+        """Form capture endpoint stores structured fields and state='raw'."""
+        user1, _ = await setup_users()
+        token = get_auth_token("alice", "password123")
+
+        response = client.post(
+            "/api/memories/capture/form",
+            json={
+                "raw_input": "Completed the quarterly planning session with the team.",
+                "mood": "accomplished",
+                "tags": ["work", "planning"],
+                "people": ["Sarah", "Mike"],
+                "location": "Conference room B",
+                "importance_level": 8,
+            },
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        assert response.status_code == 201
+        data = response.json()
+        assert data["user_id"] == str(user1.id)
+        assert data["raw_input"] == "Completed the quarterly planning session with the team."
+        assert data["input_type"] == "form"
+        assert data["mood"] == "accomplished"
+        assert data["tags"] == ["work", "planning"]
+        assert data["importance_level"] == 8
+        assert data["processing_state"] == "raw"
+
+
 class TestMemoryCaptureEndpoint:
     """Test /api/memories/capture endpoint."""
 
@@ -134,6 +219,68 @@ class TestMemoryCaptureEndpoint:
         assert data["processing_state"] == "raw"
         assert isinstance(data["created_at"], str)
         assert isinstance(data["updated_at"], str)
+
+
+class TestMemoryCaptureTextEndpoint:
+    """Test /api/memories/capture/text endpoint (Issue 4)."""
+
+    @pytest.mark.asyncio
+    async def test_capture_text_endpoint_creates_memory(self, client, setup_users, get_auth_token):
+        """Text capture endpoint creates a memory with state='raw'."""
+        user1, _ = await setup_users()
+        token = get_auth_token("alice", "password123")
+
+        response = client.post(
+            "/api/memories/capture/text",
+            json={"raw_input": "Met with Sarah downtown to discuss her new role."},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        assert response.status_code == 201
+        data = response.json()
+        assert data["user_id"] == str(user1.id)
+        assert data["raw_input"] == "Met with Sarah downtown to discuss her new role."
+        assert data["input_type"] == "text"
+        assert data["processing_state"] == "raw"
+        assert isinstance(data["created_at"], str)
+
+    @pytest.mark.asyncio
+    async def test_capture_text_schedules_refinement_task(
+        self, client, test_db, setup_users, get_auth_token, monkeypatch
+    ):
+        """After text capture, a background task transitions state to 'refined'."""
+        from sqlalchemy import select
+        from sqlalchemy.ext.asyncio import async_sessionmaker
+        from app.routes import memories
+
+        # Override background session factory to use the test database.
+        test_factory = async_sessionmaker(
+            bind=test_db.bind,
+            class_=type(test_db),
+            expire_on_commit=False,
+            autoflush=False,
+        )
+        monkeypatch.setattr(memories, "BackgroundSessionLocal", test_factory)
+
+        await setup_users()
+        token = get_auth_token("alice", "password123")
+
+        response = client.post(
+            "/api/memories/capture/text",
+            json={"raw_input": "Need to buy groceries for the weekend dinner."},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        assert response.status_code == 201
+        memory_id = response.json()["id"]
+
+        # Background tasks run synchronously after the response in TestClient.
+        stmt = select(Memory).where(Memory.id == UUID(memory_id))
+        result = await test_db.execute(stmt)
+        memory = result.scalar_one_or_none()
+
+        assert memory is not None
+        assert memory.processing_state == "refined"
 
     @pytest.mark.asyncio
     async def test_capture_voice_memory(self, client, setup_users, get_auth_token):
