@@ -13,7 +13,7 @@ router = APIRouter()
 # Resolved wiki roots.
 WIKI_ROOTS = {
     "code": Path(__file__).resolve().parents[2] / "openwiki",
-    "personal": Path.home() / ".openwiki" / "wiki",
+    "personal": Path.home() / ".openwiki",
 }
 
 
