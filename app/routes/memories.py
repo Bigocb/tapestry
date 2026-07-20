@@ -34,6 +34,8 @@ from app.models.schemas import (
     MemoryResponse,
     MemoryTextCapture,
     MemoryFormCapture,
+    SearchFilters,
+    SearchQuery,
     SearchResponse,
     SearchResult,
 )
@@ -477,6 +479,144 @@ async def capture_form_memory(
     return _memory_response(memory)
 
 
+def _matches_filters(memory: Memory, filters: SearchFilters | None) -> bool:
+    """Return True if a memory passes the structured filters."""
+    if filters is None:
+        return True
+
+    if filters.date_range_start and memory.created_at < filters.date_range_start:
+        return False
+    if filters.date_range_end and memory.created_at > filters.date_range_end:
+        return False
+
+    if filters.mood and memory.mood != filters.mood:
+        return False
+
+    if filters.importance_min is not None and memory.importance_level < filters.importance_min:
+        return False
+    if filters.importance_max is not None and memory.importance_level > filters.importance_max:
+        return False
+
+    if filters.tags:
+        memory_tags = set(memory.tags or [])
+        if not any(tag in memory_tags for tag in filters.tags):
+            return False
+
+    return True
+
+
+def _memory_searchable_text(memory: Memory) -> str:
+    """Return concatenated text from raw_input, title, and summary for full-text search."""
+    parts = [memory.raw_input or ""]
+    content = memory.structured_content or {}
+    if isinstance(content, dict):
+        parts.append(content.get("title", ""))
+        parts.append(content.get("summary", ""))
+    return " ".join(part for part in parts if part).lower()
+
+
+def _full_text_score(memory: Memory, text_query: str) -> float:
+    """Compute a simple full-text relevance score for SQLite/local dev.
+
+    On PostgreSQL this should be replaced with ts_rank_cd over a tsvector column.
+    """
+    if not text_query or not text_query.strip():
+        return 0.0
+
+    searchable = _memory_searchable_text(memory)
+    query_terms = [term.strip().lower() for term in text_query.split() if term.strip()]
+    if not query_terms:
+        return 0.0
+
+    matches = sum(1 for term in query_terms if term in searchable)
+    return matches / len(query_terms)
+
+
+def _semantic_score(memory: Memory, query_embedding: list[float]) -> float:
+    """Compute cosine similarity between memory embedding and query embedding."""
+    if not query_embedding:
+        return 0.0
+    embedding = deserialize_embedding(memory.embedding)
+    if not embedding or len(embedding) != len(query_embedding):
+        return 0.0
+    return cosine_similarity(query_embedding, embedding)
+
+
+def _filter_bonus(memory: Memory, filters: SearchFilters | None) -> float:
+    """Small bonus for memories that match structured filters (0 or 0.1)."""
+    return 0.1 if _matches_filters(memory, filters) else 0.0
+
+
+async def _search_memories(
+    db: AsyncSession,
+    user_id: str,
+    query: SearchQuery,
+) -> SearchResponse:
+    """Perform hybrid search: full-text + semantic + structured filters."""
+    from sqlalchemy import desc
+
+    text_query = (query.text or "").strip()
+    semantic_query = (query.semantic or "").strip()
+    filters = query.filters
+
+    # Generate query embedding for semantic search.
+    query_embedding: list[float] = []
+    if semantic_query:
+        query_embedding = await generate_embedding(semantic_query)
+
+    # Fetch candidate memories for this user.
+    stmt = (
+        select(Memory)
+        .where(Memory.user_id == user_id)
+        .order_by(desc(Memory.created_at))
+    )
+    result = await db.execute(stmt)
+    memories = result.scalars().all()
+
+    scored: list[tuple[float, Memory]] = []
+    for memory in memories:
+        # Filter pre-check: skip memories that fail structured filters unless
+        # they have some text/semantic signal, so pure filter mismatches drop out.
+        passes_filter = _matches_filters(memory, filters)
+        full_text = _full_text_score(memory, text_query) if text_query else 0.0
+        semantic = _semantic_score(memory, query_embedding) if query_embedding else 0.0
+
+        # If no text/semantic query, use filter match as the only signal.
+        if not text_query and not query_embedding:
+            if passes_filter:
+                scored.append((0.5, memory))
+            continue
+
+        # Weighted combination: 0.3 full-text + 0.4 semantic + 0.3 filter bonus.
+        combined = 0.3 * full_text + 0.4 * semantic + (0.3 * _filter_bonus(memory, filters))
+        if combined > 0:
+            scored.append((combined, memory))
+
+    scored.sort(key=lambda item: item[0], reverse=True)
+
+    total = len(scored)
+    offset = query.offset
+    limit = query.limit
+    page = scored[offset : offset + limit]
+
+    results = []
+    for score, memory in page:
+        content = memory.structured_content or {}
+        title = content.get("title") if isinstance(content, dict) else None
+        summary = content.get("summary") if isinstance(content, dict) else None
+        results.append(
+            SearchResult(
+                memory_id=memory.id,
+                title=title,
+                summary=summary,
+                score=round(float(score), 4),
+                created_at=memory.created_at,
+            )
+        )
+
+    return SearchResponse(results=results, total=total, limit=limit, offset=offset)
+
+
 @router.post(
     "/memories/search/semantic",
     response_model=SearchResponse,
@@ -494,51 +634,27 @@ async def search_memories_semantic(
     Uses in-memory cosine similarity for SQLite/local dev. On PostgreSQL with
     pgvector this should be replaced by a database-level similarity query.
     """
-    from sqlalchemy import desc
-
     if limit < 1:
         limit = 1
     if limit > 100:
         limit = 100
 
-    query_embedding = await generate_embedding(query)
-    if not query_embedding:
-        return SearchResponse(results=[], total=0, limit=limit, offset=0)
+    search_query = SearchQuery(semantic=query, limit=limit, offset=0)
+    return await _search_memories(db, str(current_user.id), search_query)
 
-    # Fetch user's memories with embeddings.
-    stmt = (
-        select(Memory)
-        .where(Memory.user_id == current_user.id)
-        .where(Memory.embedding.is_not(None))
-        .order_by(desc(Memory.created_at))
-    )
-    result = await db.execute(stmt)
-    memories = result.scalars().all()
 
-    scored = []
-    for memory in memories:
-        embedding = deserialize_embedding(memory.embedding)
-        if not embedding or len(embedding) != len(query_embedding):
-            continue
-        score = cosine_similarity(query_embedding, embedding)
-        scored.append((score, memory))
+@router.post(
+    "/memories/search",
+    response_model=SearchResponse,
+    summary="Hybrid memory search",
+    description="Search memories with full-text, semantic, and structured filters.",
+)
+async def search_memories(
+    query: SearchQuery,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> SearchResponse:
+    """Perform hybrid search across text, semantic, and filters."""
+    return await _search_memories(db, str(current_user.id), query)
 
-    scored.sort(key=lambda item: item[0], reverse=True)
-    top = scored[:limit]
 
-    results = []
-    for score, memory in top:
-        content = memory.structured_content or {}
-        title = content.get("title") if isinstance(content, dict) else None
-        summary = content.get("summary") if isinstance(content, dict) else None
-        results.append(
-            SearchResult(
-                memory_id=memory.id,
-                title=title,
-                summary=summary,
-                score=round(float(score), 4),
-                created_at=memory.created_at,
-            )
-        )
-
-    return SearchResponse(results=results, total=len(results), limit=limit, offset=0)
