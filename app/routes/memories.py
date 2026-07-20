@@ -807,3 +807,29 @@ async def update_memory(
     await db.refresh(memory)
     return _memory_response(memory)
 
+
+@router.delete(
+    "/memories/{memory_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Delete a memory",
+    description="Hard delete a memory and its associated entities. Returns 404 if not found or not owned.",
+)
+async def delete_memory(
+    memory_id: UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    """Delete a memory owned by the current user."""
+    stmt = select(Memory).where(Memory.id == str(memory_id)).where(Memory.user_id == current_user.id)
+    result = await db.execute(stmt)
+    memory = result.scalar_one_or_none()
+
+    if memory is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Memory not found",
+        )
+
+    await db.delete(memory)
+    await db.commit()
+
