@@ -11,6 +11,7 @@ import { useRouter } from "next/navigation";
 
 interface AuthContextType {
   token: string | null;
+  isLoading: boolean;
   login: (token: string) => void;
   logout: () => void;
 }
@@ -19,10 +20,12 @@ const AuthContext = createContext<AuthContextType | null>(null);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [token, setToken] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
   const router = useRouter();
 
   useEffect(() => {
     setToken(localStorage.getItem("token"));
+    setIsLoading(false);
   }, []);
 
   const login = (newToken: string) => {
@@ -38,7 +41,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <AuthContext.Provider value={{ token, login, logout }}>
+    <AuthContext.Provider value={{ token, isLoading, login, logout }}>
       {children}
     </AuthContext.Provider>
   );
@@ -51,14 +54,14 @@ export function useAuth() {
 }
 
 export function Protected({ children }: { children: ReactNode }) {
-  const { token } = useAuth();
+  const { token, isLoading } = useAuth();
   const router = useRouter();
 
   useEffect(() => {
-    if (token === null) return;
+    if (isLoading) return;
     if (!token) router.push("/login");
-  }, [token, router]);
+  }, [token, isLoading, router]);
 
-  if (!token) return null;
+  if (isLoading || !token) return null;
   return <>{children}</>;
 }

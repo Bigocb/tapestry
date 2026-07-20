@@ -5,13 +5,13 @@ import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth";
 
 export default function Home() {
-  const { token } = useAuth();
+  const { token, isLoading } = useAuth();
   const router = useRouter();
 
   useEffect(() => {
-    if (token === null) return;
+    if (isLoading) return;
     router.push(token ? "/capture" : "/login");
-  }, [token, router]);
+  }, [token, isLoading, router]);
 
   return <div className="p-8">Loading...</div>;
 }
