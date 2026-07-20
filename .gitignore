@@ -19,3 +19,6 @@ venv/
 
 # OpenWiki / Obsidian sidecars
 .obsidian/
+
+# Local SQLite database
+memind.db

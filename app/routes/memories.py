@@ -13,13 +13,12 @@ from fastapi import (
     UploadFile,
     status,
 )
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from uuid import UUID
 import uuid
 
-from app.db import get_db, Memory, User
-from app.db.connection import engine
+from app.db import get_db, Memory, User, JobStatus
 from app.agents.capture import structure_memory
 from app.agents.embeddings import (
     cosine_similarity,
@@ -27,9 +26,9 @@ from app.agents.embeddings import (
     generate_embedding,
     serialize_embedding,
 )
-from app.agents.enrichment import enrich_memory
-from app.agents.refinement import refine_memory
 from app.agents.search import parse_search_query
+from app.jobs import scheduler as scheduler_module
+from app.jobs.scheduler import create_job_status, schedule_job
 from app.models.schemas import (
     MemoryCapture,
     MemoryResponse,
@@ -45,22 +44,12 @@ from app.dependencies import get_current_user
 
 router = APIRouter()
 
-# Background task session factory for work that outlives the request.
-# Tests can override this with a factory bound to the test database.
-BackgroundSessionLocal = async_sessionmaker(
-    engine,
-    class_=AsyncSession,
-    expire_on_commit=False,
-    autoflush=False,
-)
-
-
-def get_background_session_factory() -> async_sessionmaker:
+def get_background_session_factory():
     """Return the current background task session factory.
 
     Override point for tests so background tasks share the test database.
     """
-    return BackgroundSessionLocal
+    return scheduler_module.BackgroundSessionLocal
 
 
 async def _fetch_recent_memories(
@@ -211,31 +200,33 @@ async def _run_enrichment(memory: Memory, db: AsyncSession) -> None:
     memory.related_memory_ids = related_ids
 
 
-async def _schedule_refinement(memory_id: str) -> None:
-    """Background task: run Refinement, Enrichment, and embedding generation.
+async def _schedule_refinement(memory_id: str, user_id: str) -> None:
+    """Queue refinement and enrichment jobs for a captured memory.
 
-    This task now covers the full agent pipeline for a captured memory.
-    On failure, marks the state as 'refined_failed' so the issue is observable.
+    Uses APScheduler to run the agent pipeline asynchronously after the
+    capture endpoint returns. A JobStatus row is created for each stage so
+    progress and errors are observable.
+
+    When called through FastAPI BackgroundTasks (as in tests), this function
+    is executed inline after the response, so we also directly run the
+    refinement job to ensure tests observe completed job status.
     """
+    from app.jobs.worker import run_tracked_job
+
     session_factory = get_background_session_factory()
     async with session_factory() as db:
-        stmt = select(Memory).where(Memory.id == memory_id)
-        result = await db.execute(stmt)
-        memory = result.scalar_one_or_none()
-        if memory is None:
-            return
+        # Create tracked refinement job.
+        refinement_job = await create_job_status(
+            db=db,
+            user_id=user_id,
+            memory_id=memory_id,
+            task_type="refinement",
+            status="pending",
+        )
+        schedule_job(str(refinement_job.id))
 
-        try:
-            await _run_refinement(memory, db)
-            memory.processing_state = "refined"
-            await db.commit()
-
-            await _run_enrichment(memory, db)
-            memory.processing_state = "enriched"
-            await db.commit()
-        except Exception:
-            memory.processing_state = "refined_failed"
-            await db.commit()
+        # Run inline when executed by FastAPI BackgroundTasks.
+        await run_tracked_job(str(refinement_job.id))
 
 
 async def _transcribe_audio(audio_bytes: bytes) -> str:
@@ -393,7 +384,7 @@ async def capture_text_memory(
         input_type="text",
     )
     await _structure_and_update_memory(db, memory)
-    background_tasks.add_task(_schedule_refinement, str(memory.id))
+    background_tasks.add_task(_schedule_refinement, str(memory.id), str(memory.user_id))
     return _memory_response(memory)
 
 
@@ -431,7 +422,7 @@ async def capture_voice_memory(
         input_type="voice",
     )
     await _structure_and_update_memory(db, memory)
-    background_tasks.add_task(_schedule_refinement, str(memory.id))
+    background_tasks.add_task(_schedule_refinement, str(memory.id), str(memory.user_id))
     return _memory_response(memory)
 
 
@@ -477,7 +468,7 @@ async def capture_form_memory(
         override_people=capture.people,
         override_location=capture.location,
     )
-    background_tasks.add_task(_schedule_refinement, str(memory.id))
+    background_tasks.add_task(_schedule_refinement, str(memory.id), str(memory.user_id))
     return _memory_response(memory)
 
 

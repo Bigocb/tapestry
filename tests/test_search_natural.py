@@ -71,7 +71,7 @@ def fake_generate_embedding(monkeypatch):
         from app.agents.embeddings import _fallback_embedding
         return _fallback_embedding(text)
 
-    monkeypatch.setattr("app.routes.memories.generate_embedding", _fake)
+    monkeypatch.setattr("app.jobs.worker.generate_embedding", _fake)
 
 
 @pytest.fixture

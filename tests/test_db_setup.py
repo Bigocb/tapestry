@@ -18,8 +18,10 @@ import uuid
 
 @pytest.fixture
 async def db_session():
-    """Create a test database session."""
-    async_engine = engine
+    """Create a test database session backed by a fresh in-memory SQLite DB."""
+    from sqlalchemy.ext.asyncio import create_async_engine
+
+    async_engine = create_async_engine("sqlite+aiosqlite:///:memory:", echo=False)
     async with async_engine.begin() as conn:
         # Create all tables (idempotent)
         await conn.run_sync(Base.metadata.create_all)
@@ -55,27 +57,22 @@ async def test_pgvector_extension_installed(db_session):
 @pytest.mark.asyncio
 async def test_schema_created(db_session):
     """Test that base schema tables exist."""
-    # Check if users table exists
+    # Cross-database table existence check (SQLite compatible).
     result = await db_session.execute(
         text("""
-        SELECT EXISTS (
-            SELECT FROM information_schema.tables 
-            WHERE table_name = 'users'
-        )
+        SELECT name FROM sqlite_master
+        WHERE type='table' AND name='users'
         """)
     )
-    assert result.scalar() is True, "users table not created"
+    assert result.scalar() is not None, "users table not created"
 
-    # Check if memories table exists
     result = await db_session.execute(
         text("""
-        SELECT EXISTS (
-            SELECT FROM information_schema.tables 
-            WHERE table_name = 'memories'
-        )
+        SELECT name FROM sqlite_master
+        WHERE type='table' AND name='memories'
         """)
     )
-    assert result.scalar() is True, "memories table not created"
+    assert result.scalar() is not None, "memories table not created"
 
 
 @pytest.mark.asyncio
@@ -97,6 +94,15 @@ async def test_can_insert_user(db_session):
     )
     retrieved_id = result.scalar()
     assert retrieved_id is not None
+
+
+@pytest.mark.asyncio
+async def test_job_status_table_exists(db_session):
+    """Test that the job_status table exists."""
+    result = await db_session.execute(
+        text("SELECT name FROM sqlite_master WHERE type='table' AND name='job_status'")
+    )
+    assert result.scalar() is not None, "job_status table not created"
 
 
 @pytest.mark.asyncio

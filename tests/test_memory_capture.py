@@ -36,7 +36,13 @@ TEST_DATABASE_URL = "sqlite+aiosqlite:///:memory:"
 @pytest.fixture
 async def test_db():
     """Create an in-memory test database."""
-    engine = create_async_engine(TEST_DATABASE_URL, echo=False)
+    from sqlalchemy.pool import StaticPool
+
+    engine = create_async_engine(
+        TEST_DATABASE_URL,
+        echo=False,
+        poolclass=StaticPool,
+    )
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
@@ -53,6 +59,7 @@ def client(test_db):
     """FastAPI test client with overridden database dependency."""
     from sqlalchemy.ext.asyncio import async_sessionmaker
     from app.routes import memories
+    from app.jobs import scheduler
 
     async def override_get_db():
         yield test_db
@@ -63,15 +70,15 @@ def client(test_db):
         expire_on_commit=False,
         autoflush=False,
     )
-    original_factory = memories.BackgroundSessionLocal
-    memories.BackgroundSessionLocal = test_factory
+    original_factory = scheduler.BackgroundSessionLocal
+    scheduler.BackgroundSessionLocal = test_factory
 
     app.dependency_overrides[get_db] = override_get_db
 
     yield TestClient(app)
 
     # Restore original factory after test.
-    memories.BackgroundSessionLocal = original_factory
+    scheduler.BackgroundSessionLocal = original_factory
     app.dependency_overrides.pop(get_db, None)
 
 
@@ -287,7 +294,7 @@ class TestMemoryCaptureTextEndpoint:
         """After text capture, the background pipeline reaches state 'enriched'."""
         from sqlalchemy import select
         from sqlalchemy.ext.asyncio import async_sessionmaker
-        from app.routes import memories
+        from app.jobs import scheduler
 
         # Override background session factory to use the test database.
         test_factory = async_sessionmaker(
@@ -296,7 +303,7 @@ class TestMemoryCaptureTextEndpoint:
             expire_on_commit=False,
             autoflush=False,
         )
-        monkeypatch.setattr(memories, "BackgroundSessionLocal", test_factory)
+        monkeypatch.setattr(scheduler, "BackgroundSessionLocal", test_factory)
 
         await setup_users()
         token = get_auth_token("alice", "password123")

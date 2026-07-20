@@ -6,6 +6,7 @@ from contextlib import asynccontextmanager
 
 # Import routes
 from app.routes import auth, memories, stories, wiki
+from app.jobs.scheduler import scheduler
 
 tags_metadata = [
     {
@@ -44,8 +45,12 @@ async def lifespan(app: FastAPI):
     """Application lifespan events (startup/shutdown)."""
     # Startup
     print("MEMIND application starting...")
+    scheduler.start()
+    print("APScheduler started.")
     yield
     # Shutdown
+    scheduler.shutdown(wait=False)
+    print("APScheduler shut down.")
     print("MEMIND application shutting down...")
 
 

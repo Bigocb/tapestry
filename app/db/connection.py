@@ -6,7 +6,7 @@ import os
 import warnings
 
 DATABASE_URL = os.getenv(
-    "DATABASE_URL", "postgresql+psycopg://postgres:postgres@localhost:5432/memind"
+    "DATABASE_URL", "sqlite+aiosqlite:///./memind.db"
 )
 
 # Convert standard postgres:// to postgresql+psycopg:// for async
@@ -15,32 +15,12 @@ if DATABASE_URL.startswith("postgres://"):
 
 
 def _create_engine():
-    """Create the async engine, falling back to SQLite if Postgres is unavailable.
+    """Create the async engine.
 
-    On local Windows development machines without libpq, the psycopg driver may
-    fail to import. We fall back to an in-memory SQLite database so that routes
-    that do not require Postgres (such as the wiki viewer) can still start.
+    Defaults to a local SQLite file for development so the app runs without
+    Postgres. Set DATABASE_URL to a PostgreSQL connection string to use
+    PostgreSQL/pgvector in production.
     """
-    if DATABASE_URL.startswith("postgresql"):
-        try:
-            return create_async_engine(
-                DATABASE_URL,
-                echo=False,
-                poolclass=NullPool,  # For Render free tier, disable connection pooling
-            )
-        except ImportError as exc:
-            warnings.warn(
-                f"Postgres driver unavailable ({exc}). Falling back to SQLite. "
-                "Set DATABASE_URL to a valid connection string to use PostgreSQL.",
-                RuntimeWarning,
-                stacklevel=2,
-            )
-            return create_async_engine(
-                "sqlite+aiosqlite:///:memory:",
-                echo=False,
-                poolclass=NullPool,
-            )
-
     return create_async_engine(
         DATABASE_URL,
         echo=False,
