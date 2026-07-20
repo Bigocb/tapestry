@@ -1,5 +1,9 @@
 """MEMIND FastAPI application entry point."""
 
+from dotenv import load_dotenv
+
+load_dotenv()
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
@@ -8,6 +12,9 @@ from contextlib import asynccontextmanager
 from app.routes import auth, memories, stories, wiki
 from app.jobs.scheduler import scheduler
 from app.db import Base, engine
+from app.agents.capture import _ollama_config
+
+import httpx
 
 tags_metadata = [
     {
@@ -85,6 +92,35 @@ app.add_middleware(
 async def health_check():
     """Check if API is running."""
     return {"status": "healthy", "version": "0.1.0"}
+
+
+@app.get("/health/ollama", tags=["health"])
+async def ollama_health_check():
+    """Check if the configured Ollama API is reachable."""
+    api_base, model, api_key = _ollama_config()
+    url = f"{api_base}/models" if api_base.endswith("/v1") else f"{api_base}/v1/models"
+    headers = {"Accept": "application/json"}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.get(url, headers=headers)
+            response.raise_for_status()
+            data = response.json()
+            models = [m.get("id", m.get("model")) for m in data.get("data", [])]
+            return {
+                "reachable": True,
+                "base_url": api_base,
+                "configured_model": model,
+                "available_models": models[:10],
+            }
+    except Exception as exc:
+        return {
+            "reachable": False,
+            "base_url": api_base,
+            "configured_model": model,
+            "error": str(exc),
+        }
 
 
 # Include routes

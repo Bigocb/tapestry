@@ -8,9 +8,9 @@ import httpx
 
 from app.models.schemas import EntityData, StructuredMemory
 
-DEFAULT_OLLAMA_API_BASE = "https://api.ollama.com"
-DEFAULT_OLLAMA_MODEL = "glm-5.1"
-REQUEST_TIMEOUT_SECONDS = 5.0
+DEFAULT_OLLAMA_API_BASE = "https://ollama.com/v1"
+DEFAULT_OLLAMA_MODEL = "llama3.2"
+REQUEST_TIMEOUT_SECONDS = 30.0
 
 
 CAPTURE_SYSTEM_PROMPT = """You are the Capture Agent for MEMIND, a memory-capture system.
@@ -48,7 +48,11 @@ async def _call_ollama_chat(prompt: str) -> dict:
     Raises RuntimeError on network or parsing failures so the caller can fall back.
     """
     api_base, model, api_key = _ollama_config()
-    url = f"{api_base}/v1/chat/completions"
+    # Support both https://ollama.com/v1 and http://localhost:11434 style bases.
+    if api_base.endswith("/v1"):
+        url = f"{api_base}/chat/completions"
+    else:
+        url = f"{api_base}/v1/chat/completions"
 
     headers = {
         "Content-Type": "application/json",
@@ -73,6 +77,13 @@ async def _call_ollama_chat(prompt: str) -> dict:
         data = response.json()
 
     content = data["choices"][0]["message"]["content"]
+    # Some models wrap JSON in markdown fences; strip them.
+    content = content.strip()
+    if content.startswith("```"):
+        content = content.split("\n", 1)[1]
+    if content.endswith("```"):
+        content = content.rsplit("\n", 1)[0]
+    content = content.strip()
     return json.loads(content)
 
 
