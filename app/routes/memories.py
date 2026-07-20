@@ -4,7 +4,15 @@ Routes for capturing, retrieving, updating, and deleting memories.
 Includes support for voice, text, and form inputs.
 """
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile, status
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    File,
+    HTTPException,
+    UploadFile,
+    status,
+)
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy import select
 from uuid import UUID
@@ -13,8 +21,21 @@ import uuid
 from app.db import get_db, Memory, User
 from app.db.connection import engine
 from app.agents.capture import structure_memory
+from app.agents.embeddings import (
+    cosine_similarity,
+    deserialize_embedding,
+    generate_embedding,
+    serialize_embedding,
+)
 from app.agents.refinement import refine_memory
-from app.models.schemas import MemoryCapture, MemoryResponse, MemoryTextCapture, MemoryFormCapture
+from app.models.schemas import (
+    MemoryCapture,
+    MemoryResponse,
+    MemoryTextCapture,
+    MemoryFormCapture,
+    SearchResponse,
+    SearchResult,
+)
 from app.dependencies import get_current_user
 
 router = APIRouter()
@@ -37,7 +58,9 @@ def get_background_session_factory() -> async_sessionmaker:
     return BackgroundSessionLocal
 
 
-async def _fetch_recent_memories(db: AsyncSession, user_id: str, exclude_memory_id: str, limit: int = 5) -> list[dict]:
+async def _fetch_recent_memories(
+    db: AsyncSession, user_id: str, exclude_memory_id: str, limit: int = 5
+) -> list[dict]:
     """Fetch the user's most recent memories (excluding the given one) as context."""
     from sqlalchemy import desc
 
@@ -56,21 +79,47 @@ async def _fetch_recent_memories(db: AsyncSession, user_id: str, exclude_memory_
         content = mem.structured_content or {}
         context.append(
             {
-                "title": content.get("title", "Untitled") if isinstance(content, dict) else "Untitled",
-                "summary": content.get("summary", "") if isinstance(content, dict) else "",
-                "entities": content.get("entities", []) if isinstance(content, dict) else [],
+                "title": content.get("title", "Untitled")
+                if isinstance(content, dict)
+                else "Untitled",
+                "summary": content.get("summary", "")
+                if isinstance(content, dict)
+                else "",
+                "entities": content.get("entities", [])
+                if isinstance(content, dict)
+                else [],
                 "created_at": mem.created_at.isoformat() if mem.created_at else None,
             }
         )
     return context
 
 
+async def _generate_embedding_for_memory(memory: Memory) -> None:
+    """Generate and attach an embedding from the memory's searchable text.
+
+    Uses the memory title + summary when available, otherwise raw_input.
+    """
+    content = memory.structured_content or {}
+    if isinstance(content, dict):
+        searchable_parts = [
+            content.get("title", ""),
+            content.get("summary", ""),
+            memory.raw_input,
+        ]
+    else:
+        searchable_parts = [memory.raw_input]
+
+    searchable_text = " ".join(part for part in searchable_parts if part).strip()
+    embedding = await generate_embedding(searchable_text)
+    memory.embedding = serialize_embedding(embedding) if embedding else None
+
+
 async def _schedule_refinement(memory_id: str) -> None:
-    """Background task: run the Refinement Agent and update the memory record.
+    """Background task: run Refinement + embedding generation for a memory.
 
     Loads the memory, fetches recent context memories, calls the Refinement Agent,
-    and stores the refined StructuredMemory. On failure, marks the state as
-    'refined_failed' so the issue is observable.
+    generates an embedding, and stores the updated StructuredMemory. On failure,
+    marks the state as 'refined_failed' so the issue is observable.
     """
     session_factory = get_background_session_factory()
     async with session_factory() as db:
@@ -96,6 +145,7 @@ async def _schedule_refinement(memory_id: str) -> None:
             memory.mood = refined.mood
             memory.importance_level = refined.importance_level
             memory.tags = refined.initial_tags
+            await _generate_embedding_for_memory(memory)
             memory.processing_state = "refined"
             await db.commit()
         except Exception:
@@ -344,3 +394,70 @@ async def capture_form_memory(
     )
     background_tasks.add_task(_schedule_refinement, str(memory.id))
     return _memory_response(memory)
+
+
+@router.post(
+    "/memories/search/semantic",
+    response_model=SearchResponse,
+    summary="Semantic memory search",
+    description="Search memories by semantic similarity to a query string.",
+)
+async def search_memories_semantic(
+    query: str,
+    limit: int = 10,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> SearchResponse:
+    """Return the top-k memories most semantically similar to the query.
+
+    Uses in-memory cosine similarity for SQLite/local dev. On PostgreSQL with
+    pgvector this should be replaced by a database-level similarity query.
+    """
+    from sqlalchemy import desc
+
+    if limit < 1:
+        limit = 1
+    if limit > 100:
+        limit = 100
+
+    query_embedding = await generate_embedding(query)
+    if not query_embedding:
+        return SearchResponse(results=[], total=0, limit=limit, offset=0)
+
+    # Fetch user's memories with embeddings.
+    stmt = (
+        select(Memory)
+        .where(Memory.user_id == current_user.id)
+        .where(Memory.embedding.is_not(None))
+        .order_by(desc(Memory.created_at))
+    )
+    result = await db.execute(stmt)
+    memories = result.scalars().all()
+
+    scored = []
+    for memory in memories:
+        embedding = deserialize_embedding(memory.embedding)
+        if not embedding or len(embedding) != len(query_embedding):
+            continue
+        score = cosine_similarity(query_embedding, embedding)
+        scored.append((score, memory))
+
+    scored.sort(key=lambda item: item[0], reverse=True)
+    top = scored[:limit]
+
+    results = []
+    for score, memory in top:
+        content = memory.structured_content or {}
+        title = content.get("title") if isinstance(content, dict) else None
+        summary = content.get("summary") if isinstance(content, dict) else None
+        results.append(
+            SearchResult(
+                memory_id=memory.id,
+                title=title,
+                summary=summary,
+                score=round(float(score), 4),
+                created_at=memory.created_at,
+            )
+        )
+
+    return SearchResponse(results=results, total=len(results), limit=limit, offset=0)
