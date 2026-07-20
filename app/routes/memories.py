@@ -680,3 +680,74 @@ async def search_memories_natural(
     return await _search_memories(db, str(current_user.id), search_query)
 
 
+@router.get(
+    "/memories/{memory_id}",
+    response_model=MemoryResponse,
+    summary="Get a memory by ID",
+    description="Retrieve a single memory with all details. Returns 404 if not found or not owned by the user.",
+)
+async def get_memory(
+    memory_id: UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> MemoryResponse:
+    """Retrieve a single memory by ID, scoped to the current user."""
+    stmt = select(Memory).where(Memory.id == str(memory_id)).where(Memory.user_id == current_user.id)
+    result = await db.execute(stmt)
+    memory = result.scalar_one_or_none()
+
+    if memory is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Memory not found",
+        )
+
+    return _memory_response(memory)
+
+
+@router.get(
+    "/memories",
+    response_model=list[MemoryResponse],
+    summary="List user memories",
+    description="List the current user's memories with pagination and sorting.",
+)
+async def list_memories(
+    limit: int = 20,
+    offset: int = 0,
+    sort: str = "created_at_desc",
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[MemoryResponse]:
+    """List memories for the current user with pagination.
+
+    Args:
+        limit: Maximum number of memories to return (1-100).
+        offset: Number of memories to skip.
+        sort: Sort order. Supports created_at_desc (default) and created_at_asc.
+    """
+    from sqlalchemy import desc, asc
+
+    if limit < 1:
+        limit = 1
+    if limit > 100:
+        limit = 100
+    if offset < 0:
+        offset = 0
+
+    order = [desc(Memory.created_at), desc(Memory.id)]
+    if sort == "created_at_asc":
+        order = [asc(Memory.created_at), asc(Memory.id)]
+
+    stmt = (
+        select(Memory)
+        .where(Memory.user_id == current_user.id)
+        .order_by(*order)
+        .offset(offset)
+        .limit(limit)
+    )
+    result = await db.execute(stmt)
+    memories = result.scalars().all()
+
+    return [_memory_response(memory) for memory in memories]
+
+
