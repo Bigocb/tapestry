@@ -35,6 +35,7 @@ from app.models.schemas import (
     MemoryResponse,
     MemoryTextCapture,
     MemoryFormCapture,
+    MemoryUpdate,
     SearchFilters,
     SearchQuery,
     SearchResponse,
@@ -750,4 +751,59 @@ async def list_memories(
 
     return [_memory_response(memory) for memory in memories]
 
+
+@router.patch(
+    "/memories/{memory_id}",
+    response_model=MemoryResponse,
+    summary="Update a memory",
+    description="Apply partial updates to a memory. Only provided fields are changed.",
+)
+async def update_memory(
+    memory_id: UUID,
+    update: MemoryUpdate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> MemoryResponse:
+    """Apply partial updates to a memory owned by the current user."""
+    stmt = select(Memory).where(Memory.id == str(memory_id)).where(Memory.user_id == current_user.id)
+    result = await db.execute(stmt)
+    memory = result.scalar_one_or_none()
+
+    if memory is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Memory not found",
+        )
+
+    if update.raw_input is not None:
+        memory.raw_input = update.raw_input
+
+    if update.structured_content is not None:
+        memory.structured_content = update.structured_content.model_dump()
+
+    if update.tags is not None:
+        memory.tags = [tag.lower()[:50] for tag in update.tags if tag]
+
+    if update.mood is not None:
+        memory.mood = update.mood[:50] if update.mood else None
+
+    if update.importance_level is not None:
+        memory.importance_level = update.importance_level
+
+    if update.related_memory_ids is not None:
+        memory.related_memory_ids = [str(m_id) for m_id in update.related_memory_ids]
+
+    # Refresh denormalized fields from structured_content if present.
+    content = memory.structured_content or {}
+    if isinstance(content, dict):
+        if content.get("mood"):
+            memory.mood = content["mood"]
+        if content.get("importance_level") is not None:
+            memory.importance_level = content["importance_level"]
+        if content.get("initial_tags"):
+            memory.tags = [tag.lower()[:50] for tag in content["initial_tags"] if tag]
+
+    await db.commit()
+    await db.refresh(memory)
+    return _memory_response(memory)
 
