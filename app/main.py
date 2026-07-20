@@ -7,6 +7,7 @@ from contextlib import asynccontextmanager
 # Import routes
 from app.routes import auth, memories, stories, wiki
 from app.jobs.scheduler import scheduler
+from app.db import Base, engine
 
 tags_metadata = [
     {
@@ -45,6 +46,9 @@ async def lifespan(app: FastAPI):
     """Application lifespan events (startup/shutdown)."""
     # Startup
     print("MEMIND application starting...")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    print("Database tables ensured.")
     scheduler.start()
     print("APScheduler started.")
     yield
