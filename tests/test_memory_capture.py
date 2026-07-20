@@ -21,7 +21,12 @@ from uuid import UUID
 from app.main import app
 from app.db import Base, User, Memory, get_db
 from app.security import hash_password
-from app.models.schemas import MemoryCapture, MemoryResponse, StructuredMemory, EntityData
+from app.models.schemas import (
+    MemoryCapture,
+    MemoryResponse,
+    StructuredMemory,
+    EntityData,
+)
 
 
 # Setup test database
@@ -149,9 +154,8 @@ class TestMemoryCaptureVoiceEndpoint:
             return "Went for a run this morning and felt great."
 
         from app import routes
-        monkeypatch.setattr(
-            routes.memories, "_transcribe_audio", fake_transcribe
-        )
+
+        monkeypatch.setattr(routes.memories, "_transcribe_audio", fake_transcribe)
 
         response = client.post(
             "/api/memories/capture/voice",
@@ -194,7 +198,10 @@ class TestMemoryCaptureFormEndpoint:
         assert response.status_code == 201
         data = response.json()
         assert data["user_id"] == str(user1.id)
-        assert data["raw_input"] == "Completed the quarterly planning session with the team."
+        assert (
+            data["raw_input"]
+            == "Completed the quarterly planning session with the team."
+        )
         assert data["input_type"] == "form"
         assert data["mood"] == "accomplished"
         assert data["tags"] == ["work", "planning"]
@@ -242,7 +249,9 @@ class TestMemoryCaptureTextEndpoint:
     """Test /api/memories/capture/text endpoint (Issue 4)."""
 
     @pytest.mark.asyncio
-    async def test_capture_text_endpoint_creates_memory(self, client, setup_users, get_auth_token, fake_structure_memory):
+    async def test_capture_text_endpoint_creates_memory(
+        self, client, setup_users, get_auth_token, fake_structure_memory
+    ):
         """Text capture endpoint creates a memory with state='capturing'."""
         user1, _ = await setup_users()
         token = get_auth_token("alice", "password123")
@@ -266,10 +275,16 @@ class TestMemoryCaptureTextEndpoint:
         assert data["tags"] == ["test"]
 
     @pytest.mark.asyncio
-    async def test_capture_text_schedules_refinement_task(
-        self, client, test_db, setup_users, get_auth_token, monkeypatch, fake_structure_memory
+    async def test_capture_text_runs_full_background_pipeline(
+        self,
+        client,
+        test_db,
+        setup_users,
+        get_auth_token,
+        monkeypatch,
+        fake_structure_memory,
     ):
-        """After text capture, a background task transitions state to 'refined'."""
+        """After text capture, the background pipeline reaches state 'enriched'."""
         from sqlalchemy import select
         from sqlalchemy.ext.asyncio import async_sessionmaker
         from app.routes import memories
@@ -301,7 +316,9 @@ class TestMemoryCaptureTextEndpoint:
         memory = result.scalar_one_or_none()
 
         assert memory is not None
-        assert memory.processing_state == "refined"
+        assert memory.processing_state == "enriched"
+        assert memory.embedding is not None
+        assert isinstance(memory.related_memory_ids, list)
 
     @pytest.mark.asyncio
     async def test_capture_voice_memory(self, client, setup_users, get_auth_token):

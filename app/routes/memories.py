@@ -27,6 +27,7 @@ from app.agents.embeddings import (
     generate_embedding,
     serialize_embedding,
 )
+from app.agents.enrichment import enrich_memory
 from app.agents.refinement import refine_memory
 from app.models.schemas import (
     MemoryCapture,
@@ -114,12 +115,103 @@ async def _generate_embedding_for_memory(memory: Memory) -> None:
     memory.embedding = serialize_embedding(embedding) if embedding else None
 
 
-async def _schedule_refinement(memory_id: str) -> None:
-    """Background task: run Refinement + embedding generation for a memory.
+async def _find_similar_memories(
+    db: AsyncSession,
+    memory: Memory,
+    exclude_memory_id: str,
+    limit: int = 5,
+) -> list[dict]:
+    """Find the top-k memories most similar to the given memory by embedding."""
+    from sqlalchemy import desc
 
-    Loads the memory, fetches recent context memories, calls the Refinement Agent,
-    generates an embedding, and stores the updated StructuredMemory. On failure,
-    marks the state as 'refined_failed' so the issue is observable.
+    target_embedding = deserialize_embedding(memory.embedding)
+    if not target_embedding:
+        return []
+
+    stmt = (
+        select(Memory)
+        .where(Memory.user_id == memory.user_id)
+        .where(Memory.id != exclude_memory_id)
+        .where(Memory.embedding.is_not(None))
+        .order_by(desc(Memory.created_at))
+    )
+    result = await db.execute(stmt)
+    memories = result.scalars().all()
+
+    scored = []
+    for mem in memories:
+        embedding = deserialize_embedding(mem.embedding)
+        if not embedding or len(embedding) != len(target_embedding):
+            continue
+        score = cosine_similarity(target_embedding, embedding)
+        scored.append((score, mem))
+
+    scored.sort(key=lambda item: item[0], reverse=True)
+    top = scored[:limit]
+
+    similar = []
+    for score, mem in top:
+        content = mem.structured_content or {}
+        similar.append(
+            {
+                "memory_id": str(mem.id),
+                "title": content.get("title") if isinstance(content, dict) else None,
+                "summary": content.get("summary")
+                if isinstance(content, dict)
+                else None,
+                "score": round(float(score), 4),
+            }
+        )
+    return similar
+
+
+async def _run_refinement(memory: Memory, db: AsyncSession) -> None:
+    """Run the Refinement Agent on a memory."""
+    recent_memories = await _fetch_recent_memories(
+        db=db,
+        user_id=str(memory.user_id),
+        exclude_memory_id=str(memory.id),
+    )
+    refined = await refine_memory(
+        raw_input=memory.raw_input,
+        structured_content=memory.structured_content or {},
+        recent_memories=recent_memories,
+    )
+
+    memory.structured_content = refined.model_dump()
+    memory.mood = refined.mood
+    memory.importance_level = refined.importance_level
+    memory.tags = refined.initial_tags
+
+
+async def _run_enrichment(memory: Memory, db: AsyncSession) -> None:
+    """Run the Enrichment Agent on a memory using similar memories as context."""
+    await _generate_embedding_for_memory(memory)
+
+    similar_memories = await _find_similar_memories(
+        db=db,
+        memory=memory,
+        exclude_memory_id=str(memory.id),
+        limit=5,
+    )
+
+    enriched, related_ids = await enrich_memory(
+        memory=memory.structured_content or {},
+        similar_memories=similar_memories,
+    )
+
+    memory.structured_content = enriched.model_dump()
+    memory.mood = enriched.mood
+    memory.importance_level = enriched.importance_level
+    memory.tags = enriched.initial_tags
+    memory.related_memory_ids = related_ids
+
+
+async def _schedule_refinement(memory_id: str) -> None:
+    """Background task: run Refinement, Enrichment, and embedding generation.
+
+    This task now covers the full agent pipeline for a captured memory.
+    On failure, marks the state as 'refined_failed' so the issue is observable.
     """
     session_factory = get_background_session_factory()
     async with session_factory() as db:
@@ -130,23 +222,12 @@ async def _schedule_refinement(memory_id: str) -> None:
             return
 
         try:
-            recent_memories = await _fetch_recent_memories(
-                db=db,
-                user_id=str(memory.user_id),
-                exclude_memory_id=str(memory.id),
-            )
-            refined = await refine_memory(
-                raw_input=memory.raw_input,
-                structured_content=memory.structured_content or {},
-                recent_memories=recent_memories,
-            )
-
-            memory.structured_content = refined.model_dump()
-            memory.mood = refined.mood
-            memory.importance_level = refined.importance_level
-            memory.tags = refined.initial_tags
-            await _generate_embedding_for_memory(memory)
+            await _run_refinement(memory, db)
             memory.processing_state = "refined"
+            await db.commit()
+
+            await _run_enrichment(memory, db)
+            memory.processing_state = "enriched"
             await db.commit()
         except Exception:
             memory.processing_state = "refined_failed"
