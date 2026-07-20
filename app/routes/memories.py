@@ -29,6 +29,7 @@ from app.agents.embeddings import (
 )
 from app.agents.enrichment import enrich_memory
 from app.agents.refinement import refine_memory
+from app.agents.search import parse_search_query
 from app.models.schemas import (
     MemoryCapture,
     MemoryResponse,
@@ -656,5 +657,26 @@ async def search_memories(
 ) -> SearchResponse:
     """Perform hybrid search across text, semantic, and filters."""
     return await _search_memories(db, str(current_user.id), query)
+
+
+@router.post(
+    "/memories/search/natural",
+    response_model=SearchResponse,
+    summary="Natural language memory search",
+    description="Parse a natural language query and run hybrid search.",
+)
+async def search_memories_natural(
+    query: str,
+    limit: int = 20,
+    offset: int = 0,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> SearchResponse:
+    """Parse natural language into SearchQuery, then perform hybrid search."""
+    search_query = await parse_search_query(query)
+    # Override pagination params from URL if provided.
+    search_query.limit = max(1, min(100, limit))
+    search_query.offset = max(0, offset)
+    return await _search_memories(db, str(current_user.id), search_query)
 
 

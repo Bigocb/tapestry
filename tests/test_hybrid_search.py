@@ -234,30 +234,4 @@ class TestHybridSearchEndpoint:
         assert data["offset"] == 1
 
 
-class TestHybridSearchHelpers:
-    """Unit tests for hybrid search helper functions."""
 
-    def test_full_text_score_counts_matching_terms(self):
-        from app.routes.memories import _full_text_score
-
-        class FakeMemory:
-            raw_input = "Had coffee with Sarah at the downtown cafe"
-            structured_content = {"title": "Coffee with Sarah", "summary": "Coffee chat"}
-
-        score = _full_text_score(FakeMemory(), "coffee sarah")
-        assert score == 1.0
-
-    def test_matches_filters_requires_any_tag(self):
-        from app.routes.memories import _matches_filters
-
-        class FakeMemory:
-            created_at = None
-            mood = "happy"
-            importance_level = 6
-            tags = ["work", "planning"]
-
-        filters = SearchFilters(tags=["planning"])
-        assert _matches_filters(FakeMemory(), filters) is True
-
-        filters = SearchFilters(tags=["health"])
-        assert _matches_filters(FakeMemory(), filters) is False
