@@ -11,7 +11,7 @@ from contextlib import asynccontextmanager
 from sqlalchemy import inspect, text
 
 # Import routes
-from app.routes import auth, memories, stories, wiki
+from app.routes import auth, memories, stories, wiki, timeline, insights
 from app.jobs.scheduler import scheduler
 from app.db import Base, engine
 from app.agents.capture import _ollama_config
@@ -144,6 +144,8 @@ async def ollama_health_check():
 app.include_router(auth.router, prefix="/api", tags=["auth"])
 app.include_router(memories.router, prefix="/api", tags=["memories"])
 app.include_router(stories.router, prefix="/api", tags=["stories"])
+app.include_router(timeline.router, prefix="/api", tags=["timeline"])
+app.include_router(insights.router, prefix="/api", tags=["insights"])
 app.include_router(wiki.router, prefix="/api", tags=["wiki"])
 
 

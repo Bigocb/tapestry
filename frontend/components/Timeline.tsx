@@ -11,18 +11,14 @@ export function Timeline() {
 
   useEffect(() => {
     api
-      .getMemories(200, 0)
+      .getTimeline({ limit: 200, order: "desc" })
       .then((data) => {
         const items: Memory[] = data.items || data.memories || data || [];
-        setMemories(
-          items.sort((a: Memory, b: Memory) => {
-            const dateA = a.event_date || a.created_at;
-            const dateB = b.event_date || b.created_at;
-            return new Date(dateB).getTime() - new Date(dateA).getTime();
-          })
-        );
+        setMemories(items);
       })
-      .catch((err: any) => setError(err.message || "Failed to load memories"));
+      .catch((err: unknown) =>
+        setError(err instanceof Error ? err.message : "Failed to load memories")
+      );
   }, []);
 
   const groupDate = (memory: Memory) =>

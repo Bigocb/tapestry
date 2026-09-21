@@ -137,6 +137,8 @@ class MemoryResponse(BaseModel):
     raw_input: str
     input_type: str
     structured_content: Optional[Union[StructuredMemory, dict]] = None
+    title: Optional[str] = None
+    summary: Optional[str] = None
     tags: List[str] = Field(default_factory=list)
     mood: Optional[str] = None
     importance_level: int = Field(default=5, ge=1, le=10)

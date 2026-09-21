@@ -88,6 +88,15 @@ export const api = {
   }) => request("POST", "/memories/search", query),
   getMemories: (limit = 20, offset = 0) =>
     request("GET", "/memories", undefined, { limit, offset }),
+  getTimeline: (params?: {
+    start_date?: string;
+    end_date?: string;
+    tags?: string;
+    mood?: string;
+    limit?: number;
+    offset?: number;
+    order?: string;
+  }) => request("GET", "/timeline", undefined, params),
   getMemory: (id: string) => request("GET", `/memories/${id}`),
   updateMemory: (id: string, update: Record<string, unknown>) =>
     request("PATCH", `/memories/${id}`, update),
@@ -101,4 +110,9 @@ export const api = {
   getStories: () => request("GET", "/stories"),
   exportStory: (id: string, format: string) =>
     request("POST", `/stories/${id}/export`, { format }),
+
+  getInsightsStats: () => request("GET", "/insights/stats"),
+  getInsightsTrends: () => request("GET", "/insights/trends"),
+  getInsightsWordCloud: () => request("GET", "/insights/word-cloud"),
+  getInsightsAchievements: () => request("GET", "/insights/achievements"),
 };

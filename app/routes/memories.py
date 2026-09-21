@@ -282,6 +282,8 @@ def _memory_response(memory: Memory) -> MemoryResponse:
         raw_input=memory.raw_input,
         input_type=memory.input_type,
         structured_content=memory.structured_content,
+        title=content.get("title"),
+        summary=content.get("summary"),
         tags=memory.tags,
         mood=memory.mood,
         importance_level=memory.importance_level,
