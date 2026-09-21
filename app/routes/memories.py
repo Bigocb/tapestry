@@ -171,10 +171,11 @@ async def _run_refinement(memory: Memory, db: AsyncSession) -> None:
         recent_memories=recent_memories,
     )
 
-    memory.structured_content = refined.model_dump()
+    memory.structured_content = refined.model_dump(mode="json")
     memory.mood = refined.mood
     memory.importance_level = refined.importance_level
     memory.tags = refined.initial_tags
+    memory.event_date = refined.event_date
 
 
 async def _run_enrichment(memory: Memory, db: AsyncSession) -> None:
@@ -193,10 +194,11 @@ async def _run_enrichment(memory: Memory, db: AsyncSession) -> None:
         similar_memories=similar_memories,
     )
 
-    memory.structured_content = enriched.model_dump()
+    memory.structured_content = enriched.model_dump(mode="json")
     memory.mood = enriched.mood
     memory.importance_level = enriched.importance_level
     memory.tags = enriched.initial_tags
+    memory.event_date = enriched.event_date
     memory.related_memory_ids = related_ids
 
 
@@ -242,8 +244,38 @@ async def _transcribe_audio(audio_bytes: bytes) -> str:
     )
 
 
+def _extract_people_and_location(structured_content: dict | None) -> tuple[list[str], str | None]:
+    """Pull people/location from structured entities and legacy form-only fields."""
+    if not isinstance(structured_content, dict):
+        return [], None
+
+    people = set()
+    location = None
+
+    for entity in structured_content.get("entities") or []:
+        if not isinstance(entity, dict):
+            continue
+        entity_type = entity.get("type")
+        value = entity.get("value")
+        if entity_type == "person" and value:
+            people.add(str(value))
+        elif entity_type == "place" and value and location is None:
+            location = str(value)
+
+    # Legacy form-only fields win over entity inference.
+    if structured_content.get("people"):
+        people = {str(p) for p in structured_content["people"] if p}
+    if structured_content.get("location"):
+        location = str(structured_content["location"]) or None
+
+    return sorted(people), location
+
+
 def _memory_response(memory: Memory) -> MemoryResponse:
     """Convert a Memory ORM object to a MemoryResponse Pydantic model."""
+    content = memory.structured_content if isinstance(memory.structured_content, dict) else {}
+    people, location = _extract_people_and_location(content)
+
     return MemoryResponse(
         id=memory.id,
         user_id=memory.user_id,
@@ -255,6 +287,9 @@ def _memory_response(memory: Memory) -> MemoryResponse:
         importance_level=memory.importance_level,
         processing_state=memory.processing_state,
         related_memory_ids=memory.related_memory_ids,
+        event_date=memory.event_date,
+        people=people,
+        location=location,
         created_at=memory.created_at,
         updated_at=memory.updated_at,
     )
@@ -311,12 +346,13 @@ async def _structure_and_update_memory(
     if override_tags:
         structured.initial_tags = override_tags
 
-    memory.structured_content = structured.model_dump()
+    memory.structured_content = structured.model_dump(mode="json")
 
     # Update denormalized top-level fields for querying/filtering.
     memory.mood = structured.mood
     memory.importance_level = structured.importance_level
     memory.tags = structured.initial_tags
+    memory.event_date = structured.event_date
 
     # Merge form-only fields (people, location) into structured_content.
     existing = memory.structured_content or {}
@@ -597,12 +633,16 @@ async def _search_memories(
         content = memory.structured_content or {}
         title = content.get("title") if isinstance(content, dict) else None
         summary = content.get("summary") if isinstance(content, dict) else None
+        event_date = content.get("event_date") if isinstance(content, dict) else None
+        if not event_date:
+            event_date = memory.event_date
         results.append(
             SearchResult(
                 memory_id=memory.id,
                 title=title,
                 summary=summary,
                 score=round(float(score), 4),
+                event_date=event_date,
                 created_at=memory.created_at,
             )
         )
@@ -770,7 +810,7 @@ async def update_memory(
         memory.raw_input = update.raw_input
 
     if update.structured_content is not None:
-        memory.structured_content = update.structured_content.model_dump()
+        memory.structured_content = update.structured_content.model_dump(mode="json")
 
     if update.tags is not None:
         memory.tags = [tag.lower()[:50] for tag in update.tags if tag]
@@ -784,8 +824,20 @@ async def update_memory(
     if update.related_memory_ids is not None:
         memory.related_memory_ids = [str(m_id) for m_id in update.related_memory_ids]
 
-    # Refresh denormalized fields from structured_content if present.
+    if update.event_date is not None:
+        memory.event_date = update.event_date
+
     content = memory.structured_content or {}
+    if not isinstance(content, dict):
+        content = {}
+
+    if update.people is not None:
+        content["people"] = [str(p) for p in update.people if p]
+
+    if update.location is not None:
+        content["location"] = update.location[:100] if update.location else None
+
+    # Refresh denormalized fields from structured_content if present.
     if isinstance(content, dict):
         if content.get("mood"):
             memory.mood = content["mood"]
@@ -793,7 +845,10 @@ async def update_memory(
             memory.importance_level = content["importance_level"]
         if content.get("initial_tags"):
             memory.tags = [tag.lower()[:50] for tag in content["initial_tags"] if tag]
+        if content.get("event_date"):
+            memory.event_date = content["event_date"]
 
+    memory.structured_content = content
     await db.commit()
     await db.refresh(memory)
     return _memory_response(memory)

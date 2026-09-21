@@ -25,7 +25,9 @@ class TestCaptureAgentHelpers:
         assert result.entities == []
         assert result.mood is None
         assert result.importance_level == 5
-        assert result.initial_tags == []
+        assert isinstance(result.initial_tags, list)
+        assert len(result.initial_tags) > 0
+        assert all(isinstance(tag, str) for tag in result.initial_tags)
 
     def test_fallback_structured_memory_truncates_long_title(self):
         raw = "x" * 200

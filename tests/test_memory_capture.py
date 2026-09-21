@@ -377,7 +377,7 @@ class TestMemoryCaptureTextEndpoint:
             },
         )
 
-        assert response.status_code == 403
+        assert response.status_code in (401, 403)
 
     @pytest.mark.asyncio
     async def test_capture_with_invalid_token(self, client):

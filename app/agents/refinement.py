@@ -2,15 +2,16 @@
 
 import json
 import os
+from datetime import datetime, timezone
 from typing import Any, Optional
 
 import httpx
 
 from app.models.schemas import EntityData, StructuredMemory
 
-DEFAULT_OLLAMA_API_BASE = "https://api.ollama.com"
-DEFAULT_OLLAMA_MODEL = "glm-5.1"
-REQUEST_TIMEOUT_SECONDS = 8.0
+DEFAULT_OLLAMA_API_BASE = "https://ollama.com/v1"
+DEFAULT_OLLAMA_MODEL = "gemma4:31b"
+REQUEST_TIMEOUT_SECONDS = 30.0
 
 
 REFINEMENT_SYSTEM_PROMPT = """You are the Refinement Agent for MEMIND.
@@ -18,12 +19,12 @@ Your job is to take a structured memory and, using the user's recent memories as
 
 Input fields:
 - raw_input: the original raw text
-- structured_content: current title, summary, entities, mood, importance_level, initial_tags
+- structured_content: current title, summary, entities, mood, importance_level, initial_tags, event_date
 - recent_memories: list of recent memory summaries for context
 
 Tasks:
 1. Resolve vague references like "that meeting", "her", "last week" into specific names/dates/events when possible using recent_memories.
-2. Normalize dates to ISO 8601 where a specific date is implied (e.g. "2024-07-15").
+2. Normalize event_date to ISO 8601 where a specific date is implied (e.g. "2024-07-15T00:00:00").
 3. Keep the title concise (3-12 words).
 4. Keep the summary 1-3 sentences.
 5. Do not invent facts that are not supported by the raw input or recent memories.
@@ -35,6 +36,7 @@ Output a single JSON object with exactly these fields:
 - mood: string or null
 - importance_level: integer 1-10
 - initial_tags: list of lowercase string tags
+- event_date: ISO 8601 datetime string or null
 
 Allowed entity types: person, place, date, event, concept.
 
@@ -52,7 +54,10 @@ def _ollama_config() -> tuple[str, str, Optional[str]]:
 async def _call_ollama_chat(messages: list[dict[str, str]]) -> dict:
     """Call the Ollama Chat API and return the parsed JSON content."""
     api_base, model, api_key = _ollama_config()
-    url = f"{api_base}/v1/chat/completions"
+    if api_base.endswith("/v1"):
+        url = f"{api_base}/chat/completions"
+    else:
+        url = f"{api_base}/v1/chat/completions"
 
     headers = {
         "Content-Type": "application/json",
@@ -74,6 +79,12 @@ async def _call_ollama_chat(messages: list[dict[str, str]]) -> dict:
         data = response.json()
 
     content = data["choices"][0]["message"]["content"]
+    content = content.strip()
+    if content.startswith("```"):
+        content = content.split("\n", 1)[1]
+    if content.endswith("```"):
+        content = content.rsplit("\n", 1)[0]
+    content = content.strip()
     return json.loads(content)
 
 
@@ -109,6 +120,18 @@ def _normalize_entities(raw_entities: list[dict]) -> list[EntityData]:
     return normalized
 
 
+def _parse_event_date(value: Any, fallback: Optional[datetime]) -> Optional[datetime]:
+    """Parse an ISO datetime string or return the fallback."""
+    if isinstance(value, datetime):
+        return value
+    if isinstance(value, str):
+        try:
+            return datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return fallback
+    return fallback
+
+
 def _build_structured_memory(raw_dict: dict, fallback: StructuredMemory) -> StructuredMemory:
     """Safely build StructuredMemory from LLM output, falling back on missing fields."""
     title = str(raw_dict.get("title") or "")
@@ -142,6 +165,8 @@ def _build_structured_memory(raw_dict: dict, fallback: StructuredMemory) -> Stru
         raw_tags = []
     initial_tags = [str(tag).lower()[:50] for tag in raw_tags if tag] or fallback.initial_tags
 
+    event_date = _parse_event_date(raw_dict.get("event_date"), fallback.event_date)
+
     return StructuredMemory(
         title=title,
         summary=summary,
@@ -149,6 +174,7 @@ def _build_structured_memory(raw_dict: dict, fallback: StructuredMemory) -> Stru
         mood=mood,
         importance_level=importance_level,
         initial_tags=initial_tags,
+        event_date=event_date,
     )
 
 
@@ -170,6 +196,8 @@ def _structured_memory_from_dict(data: dict[str, Any]) -> StructuredMemory:
     raw_tags = data.get("initial_tags") or []
     initial_tags = [str(tag).lower()[:50] for tag in raw_tags if tag] if isinstance(raw_tags, list) else []
 
+    event_date = _parse_event_date(data.get("event_date"), None)
+
     return StructuredMemory(
         title=str(data.get("title") or "Untitled")[:255],
         summary=str(data.get("summary") or "") or "No summary available",
@@ -177,6 +205,7 @@ def _structured_memory_from_dict(data: dict[str, Any]) -> StructuredMemory:
         mood=str(data.get("mood"))[:50] if data.get("mood") else None,
         importance_level=importance_level,
         initial_tags=initial_tags,
+        event_date=event_date,
     )
 
 

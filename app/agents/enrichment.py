@@ -2,29 +2,30 @@
 
 import json
 import os
+from datetime import datetime
 from typing import Any, Optional
 
 import httpx
 
 from app.models.schemas import StructuredMemory
 
-DEFAULT_OLLAMA_API_BASE = "https://api.ollama.com"
-DEFAULT_OLLAMA_MODEL = "glm-5.1"
-REQUEST_TIMEOUT_SECONDS = 8.0
+DEFAULT_OLLAMA_API_BASE = "https://ollama.com/v1"
+DEFAULT_OLLAMA_MODEL = "gemma4:31b"
+REQUEST_TIMEOUT_SECONDS = 30.0
 
 
 ENRICHMENT_SYSTEM_PROMPT = """You are the Enrichment Agent for MEMIND.
 Your job is to take a refined memory and up to 5 similar past memories, then suggest better metadata and thematic links.
 
 Input fields:
-- memory: the refined memory with title, summary, entities, mood, importance_level, initial_tags
+- memory: the refined memory with title, summary, entities, mood, importance_level, initial_tags, event_date
 - similar_memories: list of related memories with title, summary, score, memory_id
 
 Tasks:
 1. Suggest a final list of 1-8 lowercase tags that best categorize the memory, informed by similar memories.
 2. Confirm or adjust importance_level (1-10). Use similar memories as context for calibration.
 3. Identify which of the similar memories are thematically related enough to link. Return their memory_ids in related_memory_ids.
-4. Keep the title, summary, entities, and mood unchanged unless you can clearly improve them.
+4. Keep the title, summary, entities, mood, and event_date unchanged unless you can clearly improve them.
 
 Output a single JSON object with exactly these fields:
 - title: string (unchanged unless improved)
@@ -33,6 +34,7 @@ Output a single JSON object with exactly these fields:
 - mood: string or null
 - importance_level: integer 1-10
 - initial_tags: list of lowercase string tags
+- event_date: ISO 8601 datetime string or null
 - related_memory_ids: list of UUID strings from the similar_memories input
 
 Allowed entity types: person, place, date, event, concept.
@@ -51,7 +53,10 @@ def _ollama_config() -> tuple[str, str, Optional[str]]:
 async def _call_ollama_chat(messages: list[dict[str, str]]) -> dict:
     """Call the Ollama Chat API and return the parsed JSON content."""
     api_base, model, api_key = _ollama_config()
-    url = f"{api_base}/v1/chat/completions"
+    if api_base.endswith("/v1"):
+        url = f"{api_base}/chat/completions"
+    else:
+        url = f"{api_base}/v1/chat/completions"
 
     headers = {
         "Content-Type": "application/json",
@@ -73,6 +78,12 @@ async def _call_ollama_chat(messages: list[dict[str, str]]) -> dict:
         data = response.json()
 
     content = data["choices"][0]["message"]["content"]
+    content = content.strip()
+    if content.startswith("```"):
+        content = content.split("\n", 1)[1]
+    if content.endswith("```"):
+        content = content.rsplit("\n", 1)[0]
+    content = content.strip()
     return json.loads(content)
 
 
@@ -98,6 +109,18 @@ def _validate_uuid(value: Any) -> Optional[str]:
         return str(UUID_TYPE(str(value)))
     except (ValueError, TypeError):
         return None
+
+
+def _parse_event_date(value: Any, fallback: Optional[datetime]) -> Optional[datetime]:
+    """Parse an ISO datetime string or return the fallback."""
+    if isinstance(value, datetime):
+        return value
+    if isinstance(value, str):
+        try:
+            return datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return fallback
+    return fallback
 
 
 def _sanitize_enrichment_output(
@@ -138,6 +161,8 @@ def _sanitize_enrichment_output(
         else current.entities
     )
 
+    event_date = _parse_event_date(raw_dict.get("event_date"), current.event_date)
+
     return StructuredMemory(
         title=title,
         summary=summary,
@@ -145,6 +170,7 @@ def _sanitize_enrichment_output(
         mood=mood,
         importance_level=importance_level,
         initial_tags=initial_tags,
+        event_date=event_date,
     )
 
 

@@ -11,7 +11,7 @@ import httpx
 from app.models.schemas import SearchFilters, SearchQuery
 
 DEFAULT_OLLAMA_API_BASE = "https://api.ollama.com"
-DEFAULT_OLLAMA_MODEL = "glm-5.1"
+DEFAULT_OLLAMA_MODEL = "gemma4:31b"
 REQUEST_TIMEOUT_SECONDS = 8.0
 
 

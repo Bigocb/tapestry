@@ -1,10 +1,22 @@
 "use client";
 
+import { useEffect } from "react";
+import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Layout } from "@/components/Layout";
 import { LoginForm } from "@/components/AuthForm";
+import { useAuth } from "@/lib/auth";
 
 export default function LoginPage() {
+  const { token, isLoading } = useAuth();
+  const router = useRouter();
+
+  useEffect(() => {
+    if (!isLoading && token) {
+      router.push("/capture");
+    }
+  }, [token, isLoading, router]);
+
   return (
     <Layout>
       <div className="max-w-md mx-auto mt-12">

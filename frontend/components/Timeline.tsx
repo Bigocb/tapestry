@@ -15,18 +15,22 @@ export function Timeline() {
       .then((data) => {
         const items: Memory[] = data.items || data.memories || data || [];
         setMemories(
-          items.sort(
-            (a: Memory, b: Memory) =>
-              new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-          )
+          items.sort((a: Memory, b: Memory) => {
+            const dateA = a.event_date || a.created_at;
+            const dateB = b.event_date || b.created_at;
+            return new Date(dateB).getTime() - new Date(dateA).getTime();
+          })
         );
       })
       .catch((err: any) => setError(err.message || "Failed to load memories"));
   }, []);
 
+  const groupDate = (memory: Memory) =>
+    new Date(memory.event_date || memory.created_at).toLocaleDateString();
+
   const byDate = memories.reduce(
     (acc: Record<string, Memory[]>, memory) => {
-      const date = new Date(memory.created_at).toLocaleDateString();
+      const date = groupDate(memory);
       if (!acc[date]) acc[date] = [];
       acc[date].push(memory);
       return acc;
@@ -53,7 +57,7 @@ export function Timeline() {
                     {memory.title || memory.refined_text || memory.raw_input}
                   </Link>
                   <p className="text-sm text-gray-500">
-                    {new Date(memory.created_at).toLocaleTimeString([], {
+                    {new Date(memory.event_date || memory.created_at).toLocaleTimeString([], {
                       hour: "2-digit",
                       minute: "2-digit",
                     })}

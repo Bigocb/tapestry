@@ -39,6 +39,7 @@ export function MemoryEditor({ id }: { id: string }) {
         people: memory.people,
         location: memory.location,
         importance_score: memory.importance_score,
+        event_date: memory.event_date,
       });
       router.push("/search");
     } catch (err: any) {
@@ -120,6 +121,24 @@ export function MemoryEditor({ id }: { id: string }) {
             )
           }
         />
+        <label className="block col-span-2">
+          Event date
+          <input
+            type="datetime-local"
+            className="w-full border rounded p-2"
+            value={
+              memory.event_date
+                ? new Date(memory.event_date).toISOString().slice(0, 16)
+                : ""
+            }
+            onChange={(e) =>
+              update(
+                "event_date",
+                e.target.value ? new Date(e.target.value).toISOString() : undefined
+              )
+            }
+          />
+        </label>
       </div>
       <label className="block">
         Importance (1-5)

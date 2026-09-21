@@ -126,6 +126,9 @@ class Memory(Base):
     # Note: Use DBJSON for cross-database compatibility
     related_memory_ids = Column(DBJSON(), default=list, nullable=False)
 
+    # When the remembered event occurred (extracted from raw_input by agents)
+    event_date = Column(TIMESTAMP, nullable=True)
+
     # Timestamps
     created_at = Column(TIMESTAMP, server_default=func.now(), nullable=False)
     updated_at = Column(

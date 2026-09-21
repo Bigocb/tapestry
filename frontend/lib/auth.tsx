@@ -24,18 +24,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const router = useRouter();
 
   useEffect(() => {
-    setToken(localStorage.getItem("token"));
+    try {
+      setToken(localStorage.getItem("token"));
+    } catch {
+      setToken(null);
+    }
     setIsLoading(false);
   }, []);
 
   const login = (newToken: string) => {
-    localStorage.setItem("token", newToken);
+    try {
+      localStorage.setItem("token", newToken);
+    } catch {
+      // ignore storage errors
+    }
     setToken(newToken);
     router.push("/capture");
   };
 
   const logout = () => {
-    localStorage.removeItem("token");
+    try {
+      localStorage.removeItem("token");
+    } catch {
+      // ignore storage errors
+    }
     setToken(null);
     router.push("/login");
   };

@@ -8,6 +8,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 
+from sqlalchemy import inspect, text
+
 # Import routes
 from app.routes import auth, memories, stories, wiki
 from app.jobs.scheduler import scheduler
@@ -15,6 +17,20 @@ from app.db import Base, engine
 from app.agents.capture import _ollama_config
 
 import httpx
+
+
+def _has_column(conn, table_name: str, column_name: str) -> bool:
+    """Check whether a column exists on the given table."""
+    columns = [c["name"] for c in inspect(conn).get_columns(table_name)]
+    return column_name in columns
+
+
+async def _apply_pending_migrations() -> None:
+    """Add any columns that exist in the model but are missing from the DB."""
+    async with engine.begin() as conn:
+        if not await conn.run_sync(_has_column, "memories", "event_date"):
+            await conn.execute(text("ALTER TABLE memories ADD COLUMN event_date TIMESTAMP"))
+            print("Added missing event_date column to memories table.")
 
 tags_metadata = [
     {
@@ -55,6 +71,7 @@ async def lifespan(app: FastAPI):
     print("MEMIND application starting...")
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+    await _apply_pending_migrations()
     print("Database tables ensured.")
     scheduler.start()
     print("APScheduler started.")

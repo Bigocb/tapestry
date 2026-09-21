@@ -9,6 +9,7 @@ export interface Memory {
   title?: string;
   state: string;
   created_at: string;
+  event_date?: string;
   mood?: string;
   tags?: string[];
   people?: string[];
@@ -39,7 +40,11 @@ export function MemoryCard({
         )}
       </div>
       <p className="text-sm text-gray-500 mt-1">
-        {new Date(memory.created_at).toLocaleDateString()} · {memory.state}
+        {memory.event_date
+          ? new Date(memory.event_date).toLocaleDateString()
+          : new Date(memory.created_at).toLocaleDateString()}
+        {" "}
+        · {memory.state}
       </p>
       <p className="text-gray-700 mt-2 line-clamp-3">
         {memory.refined_text || memory.raw_input}

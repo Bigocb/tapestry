@@ -7,7 +7,7 @@ from typing import Optional
 import httpx
 
 DEFAULT_OLLAMA_API_BASE = "https://api.ollama.com"
-DEFAULT_OLLAMA_MODEL = "glm-5.1"
+DEFAULT_OLLAMA_MODEL = "gemma4:31b"
 DEFAULT_CLAUDE_MODEL = "claude-3-opus-20240229"
 REQUEST_TIMEOUT_SECONDS = 30.0
 

@@ -2,14 +2,44 @@
 
 import json
 import os
+import re
+from collections import Counter
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 import httpx
 
 from app.models.schemas import EntityData, StructuredMemory
 
+# Common words that look capitalized but aren't names/places.
+_DENYLIST = {
+    "i", "we", "you", "he", "she", "it", "they", "me", "us", "them", "my",
+    "your", "his", "her", "its", "our", "their", "this", "that", "these",
+    "those", "the", "a", "an", "and", "or", "but", "if", "then", "than",
+    "as", "at", "by", "for", "from", "in", "into", "of", "on", "to", "with",
+    "about", "after", "before", "during", "over", "under", "again", "once",
+    "january", "february", "march", "april", "may", "june", "july", "august",
+    "september", "october", "november", "december", "monday", "tuesday",
+    "wednesday", "thursday", "friday", "saturday", "sunday",
+}
+
+_US_STATES = {
+    "alabama", "alaska", "arizona", "arkansas", "california", "colorado",
+    "connecticut", "delaware", "florida", "georgia", "hawaii", "idaho",
+    "illinois", "indiana", "iowa", "kansas", "kentucky", "louisiana", "maine",
+    "maryland", "massachusetts", "michigan", "minnesota", "mississippi",
+    "missouri", "montana", "nebraska", "nevada", "new hampshire", "new jersey",
+    "new mexico", "new york", "north carolina", "north dakota", "ohio", "oklahoma",
+    "oregon", "pennsylvania", "rhode island", "south carolina", "south dakota",
+    "tennessee", "texas", "utah", "vermont", "virginia", "washington",
+    "west virginia", "wisconsin", "wyoming",
+}
+
+_PLACE_PREPS = {"in", "at", "from", "near", "around"}
+_PERSON_PREPS = {"to", "with", "by", "and"}
+
 DEFAULT_OLLAMA_API_BASE = "https://ollama.com/v1"
-DEFAULT_OLLAMA_MODEL = "llama3.2"
+DEFAULT_OLLAMA_MODEL = "gemma4:31b"
 REQUEST_TIMEOUT_SECONDS = 30.0
 
 
@@ -20,12 +50,32 @@ Do NOT resolve ambiguities (e.g., leave "that meeting" as-is). Do NOT add inform
 Output a single JSON object with exactly these fields:
 - title: string, 3-12 words
 - summary: string, 1-3 sentences
-- entities: list of objects with keys type, value, and optional metadata
+- entities: list of objects with keys type, value, and optional metadata. Extract all named people as "person" entities (full names), all locations as "place" entities, and any dates as "date" entities.
 - mood: string or null (a single word describing the feeling, e.g. happy, anxious, excited)
 - importance_level: integer 1-10
 - initial_tags: list of lowercase string tags, 1-5 items
+- event_date: ISO 8601 datetime string (e.g. "1976-07-29T00:00:00") or null. Infer the best date from the text, including historical dates like "July 29, 1976".
 
 Allowed entity types: person, place, date, event, concept.
+
+Example input:
+"On July 29, 1976 I was born in Conway, South Carolina to Robert Jules Cloutier and Virginia Smith Cloutier."
+
+Example output:
+{
+  "title": "Birth in Conway, South Carolina",
+  "summary": "I was born on July 29, 1976 in Conway, South Carolina to Robert Jules Cloutier and Virginia Smith Cloutier.",
+  "entities": [
+    {"type": "person", "value": "Robert Jules Cloutier"},
+    {"type": "person", "value": "Virginia Smith Cloutier"},
+    {"type": "place", "value": "Conway, South Carolina"},
+    {"type": "date", "value": "July 29, 1976"}
+  ],
+  "mood": null,
+  "importance_level": 8,
+  "initial_tags": ["birth", "conway", "south carolina", "1976", "family"],
+  "event_date": "1976-07-29T00:00:00"
+}
 
 Return ONLY valid JSON. Do not wrap it in markdown fences or add explanation."""
 
@@ -87,15 +137,218 @@ async def _call_ollama_chat(prompt: str) -> dict:
     return json.loads(content)
 
 
+def _is_sentence_start(text: str, start: int) -> bool:
+    """Return True if the match at `start` begins a sentence."""
+    preceding = text[:start].strip()
+    if not preceding:
+        return True
+    return preceding[-1] in {".", "!", "?", "\n"}
+
+
+def _extract_city_state_places(text: str) -> list[EntityData]:
+    """Find US city + state patterns, e.g. 'Conway, South Carolina'."""
+    entities: list[EntityData] = []
+    seen: set[str] = set()
+    tokens = [
+        (m.group(), m.start(), m.end())
+        for m in re.finditer(r"\b\w+\b", text)
+    ]
+    lowered_text = text.lower()
+
+    for i, (word, start, end) in enumerate(tokens):
+        # Try single-word and two-word state names.
+        state: str | None = None
+        state_end = end
+        if i + 1 < len(tokens):
+            two_word = f"{word.lower()} {tokens[i + 1][0].lower()}"
+            if two_word in _US_STATES:
+                state = two_word.title()
+                state_end = tokens[i + 1][2]
+        if state is None and word.lower() in _US_STATES:
+            state = word.lower().title()
+
+        if state is None:
+            continue
+
+        # Walk backwards to collect up to 3 city words (stop at common words/prepositions).
+        city_words: list[str] = []
+        j = i - 1
+        non_name_words = {"and", "or", "but", "the", "in", "on", "at", "to", "from", "with", "by", "for", "of"}
+        while j >= 0 and len(city_words) < 3:
+            prev_word, prev_start, prev_end = tokens[j]
+            lowered_prev = prev_word.lower()
+            if lowered_prev not in _DENYLIST and lowered_prev not in non_name_words:
+                city_words.insert(0, prev_word)
+                j -= 1
+            else:
+                break
+
+        if not city_words:
+            continue
+
+        city = " ".join(w.title() for w in city_words)
+        place = f"{city}, {state}"
+        key = place.lower()
+        if key not in seen:
+            seen.add(key)
+            entities.append(EntityData(type="place", value=place, metadata=None))
+
+    return entities
+
+
+def _extract_entities_fallback(raw_input: str) -> list[EntityData]:
+    """Deterministic fallback for people and places when the LLM returns nothing.
+
+    Looks for capitalized word sequences (2-4 words) and classifies them based
+    on nearby prepositions and known place names.
+    """
+    entities: list[EntityData] = []
+    seen: set[str] = set()
+    text = raw_input
+    lowered = text.lower()
+
+    def _norm(value: str) -> str:
+        return re.sub(r"[^a-z0-9]+", "", value.lower())
+
+    # 1) Known city + state pattern.
+    for place_entity in _extract_city_state_places(text):
+        key = _norm(place_entity.value)
+        if key not in seen:
+            seen.add(key)
+            entities.append(place_entity)
+
+    # 2) Capitalized sequences of 2-4 words.
+    non_name_words = {"and", "or", "but", "the", "in", "on", "at", "to", "from", "with", "by", "for", "of"}
+    for match in re.finditer(r"\b([A-Z][a-zA-Z\.]*(?:\s+[A-Z][a-zA-Z\.]*){1,3})\b", text):
+        value = match.group(1)
+        key = value.lower()
+        norm_key = _norm(value)
+        words = key.split()
+
+        if norm_key in seen or key in _DENYLIST or _is_sentence_start(text, match.start()):
+            continue
+        # Reject candidates containing conjunctions/prepositions in the middle.
+        if any(w in non_name_words for w in words):
+            continue
+        # Skip standalone state names (handled above).
+        if key in _US_STATES:
+            continue
+
+        # Classify by preceding context.
+        window_start = max(0, match.start() - 40)
+        window = lowered[window_start:match.start()]
+        tokens = re.findall(r"\b\w+\b", window)
+        nearby = set(tokens[-3:])
+
+        place_like = any(p in nearby for p in _PLACE_PREPS)
+        ends_with_state = any(key.endswith(f" {state}") for state in _US_STATES)
+
+        if place_like and ends_with_state:
+            entities.append(EntityData(type="place", value=value, metadata=None))
+        else:
+            entities.append(EntityData(type="person", value=value, metadata=None))
+
+        seen.add(norm_key)
+
+    return entities
+
+
+def _extract_tags_fallback(raw_input: str, entities: list[EntityData]) -> list[str]:
+    """Build simple keyword tags when the LLM doesn't provide any."""
+    stop_words = _DENYLIST | {"was", "were", "been", "have", "has", "had", "do", "does", "did", "am", "are", "is", "be"}
+    entity_values = {e.value.lower() for e in entities}
+    words = re.findall(r"\b([a-z]{3,})\b", raw_input.lower())
+    counts = Counter(w for w in words if w not in stop_words and w not in entity_values)
+    # Prefer longer, more specific words
+    candidates = sorted(counts.keys(), key=lambda w: (-counts[w], -len(w)))
+    return [w.lower()[:50] for w in candidates[:5]]
+
+
+def _extract_event_date(raw_input: str) -> Optional[datetime]:
+    """Try to infer an event date from common temporal phrases in raw text."""
+    text = raw_input.lower()
+    today = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+
+    # Explicit ISO / American style dates
+    iso_match = re.search(r"\b(\d{4}-\d{2}-\d{2})\b", raw_input)
+    if iso_match:
+        try:
+            return datetime.strptime(iso_match.group(1), "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        except ValueError:
+            pass
+
+    # Relative phrases
+    if "yesterday" in text:
+        return today - timedelta(days=1)
+    if "last week" in text or "a week ago" in text:
+        return today - timedelta(days=7)
+    if "last month" in text or "a month ago" in text:
+        return today - timedelta(days=30)
+    if "a year ago" in text or "last year" in text:
+        return today - timedelta(days=365)
+
+    match = re.search(r"(\d+)\s+days?\s+ago", text)
+    if match:
+        return today - timedelta(days=int(match.group(1)))
+    match = re.search(r"(\d+)\s+weeks?\s+ago", text)
+    if match:
+        return today - timedelta(weeks=int(match.group(1)))
+    match = re.search(r"(\d+)\s+months?\s+ago", text)
+    if match:
+        return today - timedelta(days=int(match.group(1)) * 30)
+    match = re.search(r"(\d+)\s+years?\s+ago", text)
+    if match:
+        return today - timedelta(days=int(match.group(1)) * 365)
+
+    # Full month-day-year, e.g. "July 29, 1976" or "July 29th, 1976"
+    month_day_year_match = re.search(
+        r"\b(january|february|march|april|may|june|july|august|september|october|november|december)\s+(\d{1,2})(?:st|nd|rd|th)?,?\s+(\d{4})\b",
+        text,
+    )
+    if month_day_year_match:
+        try:
+            month = month_day_year_match.group(1)
+            day = month_day_year_match.group(2)
+            year = month_day_year_match.group(3)
+            dt = datetime.strptime(f"{month} {day} {year}", "%B %d %Y")
+            return dt.replace(tzinfo=timezone.utc)
+        except ValueError:
+            pass
+
+    # Numeric dates: 07/29/1976 or 1976-07-29
+    numeric_match = re.search(r"\b(\d{4}-\d{2}-\d{2})\b", raw_input)
+    if numeric_match:
+        try:
+            return datetime.strptime(numeric_match.group(1), "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        except ValueError:
+            pass
+
+    # Month year, e.g. "July 2025"
+    month_year_match = re.search(
+        r"\b(january|february|march|april|may|june|july|august|september|october|november|december)\s+(\d{4})\b",
+        text,
+    )
+    if month_year_match:
+        try:
+            dt = datetime.strptime(f"{month_year_match.group(1)} {month_year_match.group(2)}", "%B %Y")
+            return dt.replace(tzinfo=timezone.utc)
+        except ValueError:
+            pass
+
+    return None
+
+
 def _fallback_structured_memory(raw_input: str) -> StructuredMemory:
     """Produce a safe fallback when the LLM fails."""
+    entities = _extract_entities_fallback(raw_input)
     return StructuredMemory(
         title=raw_input[:100] if len(raw_input) <= 100 else raw_input[:97] + "...",
         summary=raw_input,
-        entities=[],
+        entities=entities,
         mood=None,
         importance_level=5,
-        initial_tags=[],
+        initial_tags=_extract_tags_fallback(raw_input, entities),
+        event_date=_extract_event_date(raw_input),
     )
 
 
@@ -153,6 +406,21 @@ def _build_structured_memory(raw_dict: dict, raw_input: str) -> StructuredMemory
         raw_tags = []
     initial_tags = [str(tag).lower()[:50] for tag in raw_tags if tag]
 
+    # If the LLM left entities/tags empty, use deterministic fallback extraction.
+    if not entities:
+        entities = _extract_entities_fallback(raw_input)
+    if not initial_tags:
+        initial_tags = _extract_tags_fallback(raw_input, entities)
+
+    event_date = raw_dict.get("event_date")
+    if isinstance(event_date, str):
+        try:
+            event_date = datetime.fromisoformat(event_date.replace("Z", "+00:00"))
+        except ValueError:
+            event_date = _extract_event_date(raw_input)
+    elif not isinstance(event_date, datetime):
+        event_date = _extract_event_date(raw_input)
+
     return StructuredMemory(
         title=title,
         summary=summary,
@@ -160,6 +428,7 @@ def _build_structured_memory(raw_dict: dict, raw_input: str) -> StructuredMemory
         mood=mood,
         importance_level=importance_level,
         initial_tags=initial_tags,
+        event_date=event_date,
     )
 
 

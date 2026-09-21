@@ -105,6 +105,9 @@ class StructuredMemory(BaseModel):
     mood: Optional[str] = None
     importance_level: int = Field(default=5, ge=1, le=10)
     initial_tags: List[str] = Field(default_factory=list)
+    event_date: Optional[datetime] = Field(
+        None, description="When the remembered event occurred (ISO 8601)"
+    )
 
 
 class MemoryCapture(BaseModel):
@@ -139,6 +142,9 @@ class MemoryResponse(BaseModel):
     importance_level: int = Field(default=5, ge=1, le=10)
     processing_state: str  # 'raw', 'refined', 'enriched', 'ready'
     related_memory_ids: List[UUID] = Field(default_factory=list)
+    event_date: Optional[datetime] = None
+    people: List[str] = Field(default_factory=list)
+    location: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 
@@ -180,6 +186,9 @@ class MemoryUpdate(BaseModel):
     mood: Optional[str] = None
     importance_level: Optional[int] = Field(None, ge=1, le=10)
     related_memory_ids: Optional[List[UUID]] = None
+    event_date: Optional[datetime] = None
+    people: Optional[List[str]] = None
+    location: Optional[str] = None
 
 
 # ============================================================================
@@ -217,6 +226,7 @@ class SearchResult(BaseModel):
     title: Optional[str] = None
     summary: Optional[str] = None
     score: float = Field(..., description="Relevance score (0-1)")
+    event_date: Optional[datetime] = None
     created_at: datetime
 
     class Config:

@@ -4,7 +4,11 @@ const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "http://localhost:8000/api"
 
 function getToken() {
   if (typeof window === "undefined") return null;
-  return localStorage.getItem("token");
+  try {
+    return localStorage.getItem("token");
+  } catch {
+    return null;
+  }
 }
 
 async function request(
