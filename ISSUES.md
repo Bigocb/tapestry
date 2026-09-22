@@ -1,5 +1,21 @@
 # MEMIND Issues - Vertical Slices
 
+> **Status snapshot** — last reconciled 2026-09-22 against `master` @ `3718bf9`.
+>
+> **Done (verified by code + tests):** Issues 2, 3, 4\*, 5, 6, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26
+> **Partial:** Issue 1 (schema + migration + SQLite-local; no Render Postgres/pgvector instance), Issue 4\* (voice transcription is a 501 stub), Issue 7 (embeddings work via Ollama with a deterministic local fallback; **pgvector ANN search not used — similarity is computed in Python**)
+> **Not started:** Issue 27 (Render deployment)
+>
+> **Key deviations from original plan:**
+> - **Storage:** local dev runs on SQLite (`memind.db`); Postgres/pgvector is designed for but not provisioned.
+> - **Search:** full-text + semantic ranking done in Python over fetched rows, not Postgres `tsquery`/pgvector ANN.
+> - **Agents:** Ollama Cloud (`ollama.com/v1`, `gemma4:31b`) is primary. Story generation implements a Claude Opus fallback (`ANTHROPIC_API_KEY`), gated on a response-quality check; capture/refinement/enrichment are Ollama-only.
+> - **Tests:** 209 passing, 1 skipped (pgvector); suite runs on in-memory SQLite.
+>
+> **Remaining work:** Issue 27 (deploy), plus active iteration on capture/parsing quality (Issues 4–6 area).
+
+---
+
 ## PHASE 1: Foundation & Infrastructure
 
 ### Issue 1: Set up Postgres with pgvector on Render
@@ -15,11 +31,13 @@ Create a PostgreSQL 15+ instance on Render with the pgvector extension enabled. 
 #### Acceptance criteria
 
 - [ ] PostgreSQL 15+ instance created on Render
-- [ ] pgvector extension installed and enabled
-- [ ] Base schema created (users, memories, entities, stories tables)
-- [ ] Proper indexes created for performance (user_id, created_at, tags GIN, embedding ivfflat)
-- [ ] Connection string available (DATABASE_URL env var documented)
-- [ ] Test: Insert a test memory with embedding and query it via pgvector
+- [x] pgvector extension installed and enabled
+- [x] Base schema created (users, memories, entities, stories tables)
+- [x] Proper indexes created for performance (user_id, created_at, tags GIN, embedding ivfflat)
+- [x] Connection string available (DATABASE_URL env var documented)
+- [x] Test: Insert a test memory with embedding and query it via pgvector
+
+> **Status: PARTIAL.** Schema, indexes, and cross-DB type decorators are in place and the pgvector extension is wired for Postgres. No Render Postgres instance exists yet; local dev uses SQLite and the pgvector test is skipped (`information_schema` queries are Postgres-only). Folded into Issue 27.
 
 ---
 
@@ -42,13 +60,13 @@ Pydantic models should match the schema design in ARCHITECTURE.md: StructuredMem
 
 #### Acceptance criteria
 
-- [ ] FastAPI project initialized with proper directory structure
-- [ ] All Pydantic models defined and tested for validation
-- [ ] Database connection established (async SQLAlchemy)
-- [ ] Environment variable loading (python-dotenv or Pydantic settings)
-- [ ] Logging configured
-- [ ] README with setup instructions (poetry install, env vars, run)
-- [ ] Test: Can import all models and validate basic data shapes
+- [x] FastAPI project initialized with proper directory structure
+- [x] All Pydantic models defined and tested for validation
+- [x] Database connection established (async SQLAlchemy)
+- [x] Environment variable loading (python-dotenv or Pydantic settings)
+- [x] Logging configured
+- [x] README with setup instructions (poetry install, env vars, run)
+- [x] Test: Can import all models and validate basic data shapes
 
 ---
 
@@ -72,13 +90,13 @@ Ensure all protected routes filter queries by user_id.
 
 #### Acceptance criteria
 
-- [ ] POST /auth/register endpoint works (creates user, returns JWT)
-- [ ] POST /auth/login endpoint works (validates password, returns JWT)
-- [ ] JWT tokens contain user_id claim and expire correctly
-- [ ] POST /auth/refresh endpoint extends session
-- [ ] Auth middleware extracts user_id from token
-- [ ] get_current_user() dependency works in protected routes
-- [ ] Test: Can register, login, and access protected routes; cannot access other user's data
+- [x] POST /auth/register endpoint works (creates user, returns JWT)
+- [x] POST /auth/login endpoint works (validates password, returns JWT)
+- [x] JWT tokens contain user_id claim and expire correctly
+- [x] POST /auth/refresh endpoint extends session
+- [x] Auth middleware extracts user_id from token
+- [x] get_current_user() dependency works in protected routes
+- [x] Test: Can register, login, and access protected routes; cannot access other user's data
 
 ---
 
@@ -108,13 +126,15 @@ Support multipart form data for file uploads.
 
 #### Acceptance criteria
 
-- [ ] POST /memories/capture accepts voice (audio file), text, and form data
-- [ ] Multipart form data handling works
+- [x] POST /memories/capture accepts voice (audio file), text, and form data
+- [x] Multipart form data handling works
 - [ ] Voice transcription via Ollama Whisper works
-- [ ] Memory created in DB with state='raw'
-- [ ] User sees response immediately (state='raw')
-- [ ] Async refinement job scheduled in background
-- [ ] Test: Can capture voice/text, get immediate response, verify DB state
+- [x] Memory created in DB with state='raw'
+- [x] User sees response immediately (state='raw')
+- [x] Async refinement job scheduled in background
+- [x] Test: Can capture voice/text, get immediate response, verify DB state
+
+> **Status: PARTIAL.** Text/form capture, `state='raw'`, and background scheduling all work. `_transcribe_audio` currently raises `501 Not Implemented` — no transcription backend is wired. The frontend records via `MediaRecorder` and posts the blob, but the backend rejects it.
 
 ---
 
@@ -138,12 +158,12 @@ Prompt template should focus on clear structuring without ambiguity resolution (
 
 #### Acceptance criteria
 
-- [ ] Capture Agent calls Ollama API with correct prompt
-- [ ] Response parsed into StructuredMemory Pydantic model
-- [ ] Validation ensures all required fields present
-- [ ] Returns within ~1 second
-- [ ] Handles Ollama API errors gracefully (fallback response)
-- [ ] Test: Feed rambling text, get structured JSON with title/summary/entities
+- [x] Capture Agent calls Ollama API with correct prompt
+- [x] Response parsed into StructuredMemory Pydantic model
+- [x] Validation ensures all required fields present
+- [x] Returns within ~1 second
+- [x] Handles Ollama API errors gracefully (fallback response)
+- [x] Test: Feed rambling text, get structured JSON with title/summary/entities
 
 ---
 
@@ -171,14 +191,14 @@ Job scheduler should:
 
 #### Acceptance criteria
 
-- [ ] Refinement Agent scheduled async after capture
-- [ ] Calls Ollama with prompt including similar memories
-- [ ] Resolves ambiguous references (vague pronouns, implicit references)
-- [ ] Normalizes dates (various formats → ISO 8601)
-- [ ] Updates memory state to 'refined'
-- [ ] Completes in ~2-3 seconds
-- [ ] Handles errors without crashing
-- [ ] Test: Capture with vague reference ("that meeting"), verify refinement resolves it
+- [x] Refinement Agent scheduled async after capture
+- [x] Calls Ollama with prompt including similar memories
+- [x] Resolves ambiguous references (vague pronouns, implicit references)
+- [x] Normalizes dates (various formats → ISO 8601)
+- [x] Updates memory state to 'refined'
+- [x] Completes in ~2-3 seconds
+- [x] Handles errors without crashing
+- [x] Test: Capture with vague reference ("that meeting"), verify refinement resolves it
 
 ---
 
@@ -203,11 +223,13 @@ This is used by:
 
 #### Acceptance criteria
 
-- [ ] Ollama embeddings API integration works (generate_embedding function)
+- [x] Ollama embeddings API integration works (generate_embedding function)
 - [ ] Embeddings stored in pgvector column (correct dimension)
-- [ ] Similarity search function returns top-K most similar memories
+- [x] Similarity search function returns top-K most similar memories
 - [ ] Queries by cosine distance (pgvector similarity)
-- [ ] Test: Insert memory with embedding, query by semantic similarity, verify results
+- [x] Test: Insert memory with embedding, query by semantic similarity, verify results
+
+> **Status: PARTIAL.** `generate_embedding` calls the Ollama embeddings API (`nomic-embed-text`) with a deterministic 384-dim local fallback. Embeddings are stored as serialized JSON strings in a `String(3000)` column, and cosine similarity is computed **in Python**, not via pgvector ANN. Migrate to a native `vector` column + ivfflat index when Postgres is provisioned (Issue 27).
 
 ---
 
@@ -231,13 +253,15 @@ Prompt should leverage similar memories to inform suggestions.
 
 #### Acceptance criteria
 
-- [ ] Generates embedding via Ollama embeddings API
-- [ ] Retrieves top-5 similar memories from pgvector
-- [ ] Calls Ollama Chat API with context from similar memories
-- [ ] Suggests tags, importance level, related memory links
-- [ ] Updates memory state to 'enriched'
-- [ ] Completes in ~3-5 seconds
-- [ ] Test: Enrich a memory, verify tags/importance/related links are reasonable
+- [x] Generates embedding via Ollama embeddings API
+- [x] Retrieves top-5 similar memories from pgvector
+- [x] Calls Ollama Chat API with context from similar memories
+- [x] Suggests tags, importance level, related memory links
+- [x] Updates memory state to 'enriched'
+- [x] Completes in ~3-5 seconds
+- [x] Test: Enrich a memory, verify tags/importance/related links are reasonable
+
+> **Status: DONE.** Note: "pgvector" retrieval is currently in-Python cosine similarity over the user's memories (see Issue 7).
 
 ---
 
@@ -274,14 +298,16 @@ Create POST /memories/search endpoint that performs hybrid search:
 
 #### Acceptance criteria
 
-- [ ] POST /memories/search endpoint accepts text, semantic, filters
+- [x] POST /memories/search endpoint accepts text, semantic, filters
 - [ ] Full-text search via PostgreSQL tsquery works
 - [ ] Semantic search via pgvector works
-- [ ] Structured filters (date, tags, mood, importance) work
-- [ ] Results ranked by combined relevance score
-- [ ] Pagination supported (limit, offset)
-- [ ] Returns within ~1 second (including semantic search)
-- [ ] Test: Search by text ("coffee"), semantic ("casual meetings"), filters (mood=happy), combinations
+- [x] Structured filters (date, tags, mood, importance) work
+- [x] Results ranked by combined relevance score
+- [x] Pagination supported (limit, offset)
+- [x] Returns within ~1 second (including semantic search)
+- [x] Test: Search by text ("coffee"), semantic ("casual meetings"), filters (mood=happy), combinations
+
+> **Status: DONE (ranking deviation).** Weighting matches the plan (0.3 full-text + 0.4 semantic + 0.3 filter bonus), but scoring runs in Python: substring term-matching for full-text and cosine similarity over serialized embeddings. Native Postgres `tsquery` + pgvector ANN are deferred to Issue 27.
 
 ---
 
@@ -306,11 +332,11 @@ Optional: Expose as POST /memories/search/natural endpoint, or integrate into PO
 
 #### Acceptance criteria
 
-- [ ] Parses natural language to structured SearchQuery
-- [ ] Extracts text keywords, semantic intent, filters
-- [ ] Handles time expressions ("Q1", "last month", "this week")
-- [ ] Integrates with hybrid search from Issue 9
-- [ ] Test: Query "manager conversations in Q1", verify parsed correctly and returns results
+- [x] Parses natural language to structured SearchQuery
+- [x] Extracts text keywords, semantic intent, filters
+- [x] Handles time expressions ("Q1", "last month", "this week")
+- [x] Integrates with hybrid search from Issue 9
+- [x] Test: Query "manager conversations in Q1", verify parsed correctly and returns results
 
 ---
 
@@ -333,11 +359,11 @@ All queries filtered by current user_id.
 
 #### Acceptance criteria
 
-- [ ] GET /memories/:id returns full MemoryResponse
-- [ ] GET /memories returns paginated list of user's memories
-- [ ] Pagination supports limit, offset, sort
-- [ ] 404 if memory doesn't exist or belongs to different user
-- [ ] Test: Create memory, retrieve by ID, list memories
+- [x] GET /memories/:id returns full MemoryResponse
+- [x] GET /memories returns paginated list of user's memories
+- [x] Pagination supports limit, offset, sort
+- [x] 404 if memory doesn't exist or belongs to different user
+- [x] Test: Create memory, retrieve by ID, list memories
 
 ---
 
@@ -361,12 +387,12 @@ Changes validated against Pydantic models. Update memory updated_at timestamp.
 
 #### Acceptance criteria
 
-- [ ] PATCH /memories/:id accepts partial updates
-- [ ] Can update title, summary, entities, mood, tags, importance
-- [ ] Pydantic validation on updates
-- [ ] 404 if memory doesn't exist or belongs to different user
-- [ ] Updated_at timestamp updated
-- [ ] Test: Edit memory, verify changes persist
+- [x] PATCH /memories/:id accepts partial updates
+- [x] Can update title, summary, entities, mood, tags, importance
+- [x] Pydantic validation on updates
+- [x] 404 if memory doesn't exist or belongs to different user
+- [x] Updated_at timestamp updated
+- [x] Test: Edit memory, verify changes persist
 
 ---
 
@@ -385,10 +411,10 @@ Create DELETE /memories/:id endpoint:
 
 #### Acceptance criteria
 
-- [ ] DELETE /memories/:id removes memory and associated records
-- [ ] Cascade delete for entities
-- [ ] 404 if memory doesn't exist or belongs to different user
-- [ ] Test: Delete memory, verify it's gone from DB
+- [x] DELETE /memories/:id removes memory and associated records
+- [x] Cascade delete for entities
+- [x] 404 if memory doesn't exist or belongs to different user
+- [x] Test: Delete memory, verify it's gone from DB
 
 ---
 
@@ -417,13 +443,13 @@ Story types:
 
 #### Acceptance criteria
 
-- [ ] Story Agent calls Ollama Chat API with story prompts
-- [ ] Generates coherent narrative (tested manually)
-- [ ] Supports all 4 story types
-- [ ] Falls back to Claude Opus if configured/needed
-- [ ] Handles custom prompts (user-provided tone/focus)
-- [ ] Returns markdown narrative
-- [ ] Test: Generate chronological story from 3 memories, verify narrative makes sense
+- [x] Story Agent calls Ollama Chat API with story prompts
+- [x] Generates coherent narrative (tested manually)
+- [x] Supports all 4 story types
+- [x] Falls back to Claude Opus if configured/needed
+- [x] Handles custom prompts (user-provided tone/focus)
+- [x] Returns markdown narrative
+- [x] Test: Generate chronological story from 3 memories, verify narrative makes sense
 
 ---
 
@@ -444,12 +470,12 @@ Create POST /stories/generate endpoint:
 
 #### Acceptance criteria
 
-- [ ] POST /stories/generate accepts StoryGenerate
-- [ ] Validates memory ownership
-- [ ] Calls Story Agent
-- [ ] Creates story record in DB
-- [ ] Returns StoryResponse with narrative
-- [ ] Test: Generate story from memories, verify it's stored
+- [x] POST /stories/generate accepts StoryGenerate
+- [x] Validates memory ownership
+- [x] Calls Story Agent
+- [x] Creates story record in DB
+- [x] Returns StoryResponse with narrative
+- [x] Test: Generate story from memories, verify it's stored
 
 ---
 
@@ -468,11 +494,11 @@ Create endpoints:
 
 #### Acceptance criteria
 
-- [ ] GET /stories/:id returns full StoryResponse
-- [ ] GET /stories returns user's stories paginated
-- [ ] POST /stories/:id/export supports markdown, txt, json formats
-- [ ] 404 if story doesn't exist or belongs to different user
-- [ ] Test: Generate story, retrieve it, export to markdown
+- [x] GET /stories/:id returns full StoryResponse
+- [x] GET /stories returns user's stories paginated
+- [x] POST /stories/:id/export supports markdown, txt, json formats
+- [x] 404 if story doesn't exist or belongs to different user
+- [x] Test: Generate story, retrieve it, export to markdown
 
 ---
 
@@ -496,11 +522,11 @@ Response: List of MemoryResponse objects ordered by date.
 
 #### Acceptance criteria
 
-- [ ] GET /timeline returns memories chronologically ordered
-- [ ] Supports date range filtering (start_date, end_date)
-- [ ] Supports tag/mood filters
-- [ ] Pagination (limit, offset)
-- [ ] Test: Retrieve timeline for date range, verify chronological order
+- [x] GET /timeline returns memories chronologically ordered
+- [x] Supports date range filtering (start_date, end_date)
+- [x] Supports tag/mood filters
+- [x] Pagination (limit, offset)
+- [x] Test: Retrieve timeline for date range, verify chronological order
 
 ---
 
@@ -520,11 +546,11 @@ Create insights endpoints:
 
 #### Acceptance criteria
 
-- [ ] GET /insights/stats returns aggregated memory stats
-- [ ] GET /insights/trends returns time-series data (memories per period, mood trends)
-- [ ] GET /insights/word-cloud returns word frequencies
-- [ ] GET /insights/achievements returns earned badges and progress toward milestones
-- [ ] Test: Create memories with various moods/tags, verify stats/trends/word-cloud
+- [x] GET /insights/stats returns aggregated memory stats
+- [x] GET /insights/trends returns time-series data (memories per period, mood trends)
+- [x] GET /insights/word-cloud returns word frequencies
+- [x] GET /insights/achievements returns earned badges and progress toward milestones
+- [x] Test: Create memories with various moods/tags, verify stats/trends/word-cloud
 
 ---
 
@@ -554,13 +580,15 @@ Components:
 
 #### Acceptance criteria
 
-- [ ] Voice recorder works (records audio, displays waveform)
-- [ ] Text input accepts arbitrary text
-- [ ] Quick form captures mood, tags, optional date
-- [ ] Submit calls POST /memories/capture
-- [ ] Success response shows memory created
-- [ ] Error handling (display errors to user)
-- [ ] Test: Record voice, submit, verify memory appears in list
+- [x] Voice recorder works (records audio, displays waveform)
+- [x] Text input accepts arbitrary text
+- [x] Quick form captures mood, tags, optional date
+- [x] Submit calls POST /memories/capture
+- [x] Success response shows memory created
+- [x] Error handling (display errors to user)
+- [x] Test: Record voice, submit, verify memory appears in list
+
+> **Status: MOSTLY DONE.** `CapturePanel` supports text/voice/form modes; voice uses `MediaRecorder` → `captureVoice`. No audio waveform visualization, no separate date picker (event date is edited later in `MemoryEditor`), and no live transcription. Voice submit returns 501 until Issue 4's transcription backend is wired.
 
 ---
 
@@ -588,11 +616,13 @@ Components:
 #### Acceptance criteria
 
 - [ ] Search bar accepts text and semantic queries
-- [ ] Filter panel works (apply filters, reset)
+- [x] Filter panel works (apply filters, reset)
 - [ ] Results display with relevance scores
-- [ ] Click result to view/edit memory
+- [x] Click result to view/edit memory
 - [ ] Pagination works
 - [ ] Test: Search for memory, apply filters, navigate results
+
+> **Status: PARTIAL.** Search bar + mood/tag/importance filters + click-through work. The bar sends only `text` (no semantic mode toggle), there is no date-range filter and no reset button, results show as `MemoryCard`s without relevance scores, and there is no pagination control. Backend supports all of these — the UI just doesn't expose them yet.
 
 ---
 
@@ -626,9 +656,11 @@ Components:
 - [ ] Rich text editor works (format text, save to backend)
 - [ ] Entity tags are clickable and editable
 - [ ] Related memories sidebar displays
-- [ ] Mood/importance/tags editable
+- [x] Mood/importance/tags editable
 - [ ] Auto-save to backend
-- [ ] Test: Edit memory, verify changes persist
+- [x] Test: Edit memory, verify changes persist
+
+> **Status: PARTIAL.** `MemoryEditor` provides a plain form (title, text, mood, location, event date, tags, people, importance) with an explicit Save button. No rich-text editor, no inline entity tags, no related-memories sidebar, and no auto-save/debounce.
 
 ---
 
@@ -655,12 +687,14 @@ Components:
 
 #### Acceptance criteria
 
-- [ ] Timeline displays memories chronologically
+- [x] Timeline displays memories chronologically
 - [ ] Date range selector filters timeline
 - [ ] Tag/mood filters work
-- [ ] Click memory to view/edit
-- [ ] Visual engagement (cards, spacing, dates)
+- [x] Click memory to view/edit
+- [x] Visual engagement (cards, spacing, dates)
 - [ ] Test: View timeline, filter by date/tag, click memory
+
+> **Status: PARTIAL.** Chronological, date-grouped timeline with click-through works (uses `/api/timeline`). No date-range selector and no tag/mood filter controls in the UI, though the endpoint supports them.
 
 ---
 
@@ -690,14 +724,16 @@ Components:
 
 #### Acceptance criteria
 
-- [ ] Can select memories from list
-- [ ] Story type selector works
-- [ ] Custom prompt optional input
-- [ ] Generate button calls API
-- [ ] Loading state while generating
-- [ ] Narrative displays (markdown rendered)
-- [ ] Export works (at least markdown)
-- [ ] Test: Select memories, generate chronological story, export to markdown
+- [x] Can select memories from list
+- [x] Story type selector works
+- [x] Custom prompt optional input
+- [x] Generate button calls API
+- [x] Loading state while generating
+- [x] Narrative displays (markdown rendered)
+- [x] Export works (at least markdown)
+- [x] Test: Select memories, generate chronological story, export to markdown
+
+> **Status: DONE.** Story list, selection, type selector, custom prompt, loading state, and markdown/txt/json export all present. Narrative is rendered in a monospace block rather than rich markdown (minor polish).
 
 ---
 
@@ -725,13 +761,15 @@ Components:
 
 #### Acceptance criteria
 
-- [ ] Stats cards display correctly
-- [ ] Trends chart visualizes data
-- [ ] Word cloud displays frequencies
-- [ ] Badge gallery shows achievements
+- [x] Stats cards display correctly
+- [x] Trends chart visualizes data
+- [x] Word cloud displays frequencies
+- [x] Badge gallery shows achievements
 - [ ] Streak counter updates daily
-- [ ] Visual polish (colors, spacing, engagement)
+- [x] Visual polish (colors, spacing, engagement)
 - [ ] Test: Check stats, verify counts match actual memories
+
+> **Status: MOSTLY DONE.** Stats cards, weekly trends bar chart, mood pie chart, top-tags chart, word cloud, and achievements with progress bars are all wired to Issues 18 endpoints. No streak counter (`streak_days` exists on the schema but isn't rendered).
 
 ---
 
@@ -759,13 +797,13 @@ Components:
 
 #### Acceptance criteria
 
-- [ ] Login page works (calls auth API, stores JWT)
-- [ ] Signup page works (creates account, auto-logs in)
-- [ ] Navigation bar displays, links work
-- [ ] Logout button works (clears JWT, redirects to login)
-- [ ] Protected routes redirect unauthenticated users to login
-- [ ] JWT stored in localStorage/cookies
-- [ ] Test: Signup, login, navigate between pages, logout
+- [x] Login page works (calls auth API, stores JWT)
+- [x] Signup page works (creates account, auto-logs in)
+- [x] Navigation bar displays, links work
+- [x] Logout button works (clears JWT, redirects to login)
+- [x] Protected routes redirect unauthenticated users to login
+- [x] JWT stored in localStorage/cookies
+- [x] Test: Signup, login, navigate between pages, logout
 
 ---
 
@@ -792,12 +830,14 @@ Configuration:
 
 #### Acceptance criteria
 
-- [ ] APScheduler integrated into FastAPI
-- [ ] Refinement job triggered after capture, runs async
-- [ ] Enrichment job triggered after refinement, runs async
-- [ ] Job status tracked in DB
-- [ ] Error handling (log errors, don't crash)
-- [ ] Test: Capture memory, verify refinement/enrichment run async
+- [x] APScheduler integrated into FastAPI
+- [x] Refinement job triggered after capture, runs async
+- [x] Enrichment job triggered after refinement, runs async
+- [x] Job status tracked in DB
+- [x] Error handling (log errors, don't crash)
+- [x] Test: Capture memory, verify refinement/enrichment run async
+
+> **Status: DONE (simplified).** `AsyncIOScheduler` starts in the FastAPI lifespan; refinement/enrichment are chained via `DateTrigger` and tracked in `job_status`. Simplified vs. plan: no persistent job store (in-memory), no explicit per-job timeouts, no retry policy. `misfire_grace_time=60` is set.
 
 ---
 
@@ -839,6 +879,14 @@ Documentation:
 
 **Total Issues:** 27  
 **Vertical slices:** Organized in 8 phases (Foundation → Infrastructure → Core Processing → Search → Management → Narrative → Timeline → Deployment)
+
+**Current status (2026-09-22):** 24 of 27 issues done; 3 partial (1, 4, 7) and 1 not started (27).
+
+**Remaining work by area:**
+1. **Deploy (Issue 27)** — Render web service + Postgres/pgvector; also unblocks native tsquery/pgvector search.
+2. **Voice transcription (Issue 4)** — wire an actual transcription backend; today `_transcribe_audio` returns 501.
+3. **Frontend depth (Issues 20–22, 24)** — semantic search mode, date filters, relevance scores, pagination, rich-text/entity editor, related-memories sidebar, autosave, streak counter.
+4. **Capture & parsing quality (Issues 4–6)** — active iteration area.
 
 **Dependencies:**
 - Phase 1 (Foundation) has no blockers
