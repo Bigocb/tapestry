@@ -11,11 +11,58 @@ function getToken() {
   }
 }
 
+function setToken(token: string | null) {
+  if (typeof window === "undefined") return;
+  try {
+    if (token) localStorage.setItem("token", token);
+    else localStorage.removeItem("token");
+  } catch {
+    // ignore storage errors
+  }
+}
+
+function redirectToLogin() {
+  if (typeof window === "undefined") return;
+  if (window.location.pathname === "/login") return;
+  window.location.href = "/login";
+}
+
+let refreshPromise: Promise<string | null> | null = null;
+
+async function refreshAccessToken(): Promise<string | null> {
+  const token = getToken();
+  if (!token) return null;
+
+  if (!refreshPromise) {
+    refreshPromise = fetch(`${API_BASE}/auth/refresh`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token }),
+    })
+      .then(async (response) => {
+        if (!response.ok) return null;
+        const data = await response.json().catch(() => null);
+        if (data?.access_token) {
+          setToken(data.access_token);
+          return data.access_token as string;
+        }
+        return null;
+      })
+      .catch(() => null)
+      .finally(() => {
+        refreshPromise = null;
+      });
+  }
+
+  return refreshPromise;
+}
+
 async function request(
   method: string,
   path: string,
   body?: unknown,
-  params?: Record<string, string | number | undefined>
+  params?: Record<string, string | number | undefined>,
+  allowRetry = true
 ) {
   const url = new URL(`${API_BASE}${path}`, window.location.origin);
   if (params) {
@@ -36,6 +83,17 @@ async function request(
   });
 
   if (response.status === 204) return null;
+
+  // On an expired/invalid token, try one refresh, then retry the request.
+  if (response.status === 401 && allowRetry) {
+    const refreshed = await refreshAccessToken();
+    if (refreshed) {
+      return request(method, path, body, params, false);
+    }
+    setToken(null);
+    redirectToLogin();
+    throw new Error("Session expired. Please log in again.");
+  }
 
   const data = await response.json().catch(() => null);
   if (!response.ok) {
@@ -68,6 +126,23 @@ export const api = {
       headers: { Authorization: `Bearer ${getToken() || ""}` },
       body: form,
     }).then(async (r) => {
+      if (r.status === 401) {
+        const refreshed = await refreshAccessToken();
+        if (refreshed) {
+          return fetch(`${API_BASE}/memories/capture/voice`, {
+            method: "POST",
+            headers: { Authorization: `Bearer ${refreshed}` },
+            body: form,
+          }).then(async (retry) => {
+            const data = await retry.json().catch(() => null);
+            if (!retry.ok) throw new Error(data?.detail || `Request failed: ${retry.status}`);
+            return data;
+          });
+        }
+        setToken(null);
+        redirectToLogin();
+        throw new Error("Session expired. Please log in again.");
+      }
       const data = await r.json().catch(() => null);
       if (!r.ok) throw new Error(data?.detail || `Request failed: ${r.status}`);
       return data;

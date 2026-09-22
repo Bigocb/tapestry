@@ -308,6 +308,36 @@ class TestTokenRefresh:
         assert response.status_code == 401
         assert "User not found" in response.json()["detail"]
 
+    def test_refresh_expired_token(self, client):
+        """Refresh an expired token for an existing user succeeds."""
+        from datetime import timedelta
+
+        # Register and login to get a real user id
+        client.post(
+            "/api/auth/register",
+            json={
+                "username": "expiryuser",
+                "email": "expiry@example.com",
+                "password": "securepassword123",
+            },
+        )
+        login_response = client.post(
+            "/api/auth/login",
+            json={"username": "expiryuser", "password": "securepassword123"},
+        )
+        valid_token = login_response.json()["access_token"]
+        user_id = decode_access_token(valid_token).user_id
+
+        expired_token = create_access_token(
+            user_id=user_id,
+            username="expiryuser",
+            expires_delta=timedelta(minutes=-5),
+        )
+
+        response = client.post("/api/auth/refresh", json={"token": expired_token})
+        assert response.status_code == 200
+        assert "access_token" in response.json()
+
 
 class TestUserIsolation:
     """Test that users are properly isolated."""

@@ -57,10 +57,22 @@ def create_access_token(
     return encoded_jwt
 
 
-def decode_access_token(token: str) -> Optional[TokenData]:
-    """Decode and validate a JWT access token."""
+def decode_access_token(token: str, verify_exp: bool = True) -> Optional[TokenData]:
+    """Decode and validate a JWT access token.
+
+    Args:
+        token: The encoded JWT.
+        verify_exp: When False, an expired token still decodes successfully.
+            Used by the refresh endpoint so a recently expired token can be
+            exchanged for a new one.
+    """
     try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        payload = jwt.decode(
+            token,
+            SECRET_KEY,
+            algorithms=[ALGORITHM],
+            options={"verify_exp": verify_exp},
+        )
         user_id: str = payload.get("user_id")
         username: str = payload.get("username")
 

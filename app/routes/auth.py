@@ -95,9 +95,10 @@ class TokenRefreshRequest(BaseModel):
 @router.post("/refresh", response_model=TokenResponse)
 async def refresh_token(req: TokenRefreshRequest, db: AsyncSession = Depends(get_db)):
     """Refresh an expired token (returns new token if user exists)."""
-    # For now, we decode without checking expiration for refresh endpoint
-    # In production, you might use a separate refresh token mechanism
-    token_data = decode_access_token(req.token)
+    # Decode without enforcing expiration so a recently expired token can be
+    # exchanged for a fresh one. The signature is still verified, and the user
+    # must still exist.
+    token_data = decode_access_token(req.token, verify_exp=False)
 
     if not token_data:
         raise HTTPException(

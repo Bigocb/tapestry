@@ -32,6 +32,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setIsLoading(false);
   }, []);
 
+  // Keep React state in sync when the API layer silently refreshes the token
+  // (or clears it after a failed refresh) directly in localStorage.
+  useEffect(() => {
+    const sync = (e: StorageEvent) => {
+      if (e.key === "token") setToken(e.newValue);
+    };
+    window.addEventListener("storage", sync);
+    return () => window.removeEventListener("storage", sync);
+  }, []);
+
   const login = (newToken: string) => {
     try {
       localStorage.setItem("token", newToken);
