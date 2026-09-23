@@ -53,12 +53,17 @@ def get_background_session_factory():
 
 
 
-async def _schedule_refinement(memory_id: str, user_id: str) -> None:
+async def _schedule_refinement(
+    memory_id: str, user_id: str, overrides: dict | None = None
+) -> None:
     """Queue refinement and enrichment jobs for a captured memory.
 
     Uses APScheduler to run the agent pipeline asynchronously after the
     capture endpoint returns. A JobStatus row is created for each stage so
     progress and errors are observable.
+
+    ``overrides`` carries user edits that must be re-applied after the agents
+    run, so reprocessing a text edit does not clobber manual corrections.
 
     When the scheduler is not running (e.g. under TestClient, which does not
     run the FastAPI lifespan), the job is executed inline instead so tests
@@ -76,6 +81,7 @@ async def _schedule_refinement(memory_id: str, user_id: str) -> None:
             memory_id=memory_id,
             task_type="refinement",
             status="pending",
+            overrides=overrides,
         )
 
         if scheduler_module.scheduler.running:
@@ -665,10 +671,17 @@ async def list_memories(
 async def update_memory(
     memory_id: UUID,
     update: MemoryUpdate,
+    background_tasks: BackgroundTasks,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> MemoryResponse:
-    """Apply partial updates to a memory owned by the current user."""
+    """Apply partial updates to a memory owned by the current user.
+
+    Editing the raw text invalidates everything the agents derived from it, so
+    the memory is requeued for refinement + enrichment. Any other field set in
+    the same request is treated as a user override and re-applied after the
+    agents run, so a manual correction is never clobbered.
+    """
     stmt = select(Memory).where(Memory.id == str(memory_id)).where(Memory.user_id == current_user.id)
     result = await db.execute(stmt)
     memory = result.scalar_one_or_none()
@@ -678,6 +691,11 @@ async def update_memory(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Memory not found",
         )
+
+    # Detect a genuine text change before overwriting it.
+    raw_input_changed = (
+        update.raw_input is not None and update.raw_input != memory.raw_input
+    )
 
     if update.raw_input is not None:
         memory.raw_input = update.raw_input
@@ -738,8 +756,39 @@ async def update_memory(
 
     memory.structured_content = content
     _apply_review_flags(memory)
+
+    # If the source text changed, re-run the agents. Fields the user set in
+    # this request are passed as overrides so they survive the rerun.
+    if raw_input_changed:
+        overrides = {
+            key: value
+            for key, value in {
+                "title": update.title,
+                "summary": update.summary,
+                "tags": update.tags,
+                "mood": update.mood,
+                "importance_level": update.importance_level,
+                "event_date": (
+                    update.event_date.isoformat() if update.event_date else None
+                ),
+                "people": update.people,
+                "location": update.location,
+            }.items()
+            if value is not None
+        }
+        memory.processing_state = "capturing"
+
     await db.commit()
     await db.refresh(memory)
+
+    if raw_input_changed:
+        background_tasks.add_task(
+            _schedule_refinement,
+            str(memory.id),
+            str(memory.user_id),
+            overrides,
+        )
+
     return _memory_response(memory)
 
 

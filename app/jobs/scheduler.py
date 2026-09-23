@@ -41,14 +41,20 @@ async def create_job_status(
     memory_id: str,
     task_type: str,
     status: str = "pending",
+    overrides: dict | None = None,
 ) -> JobStatus:
-    """Create and persist a JobStatus row."""
+    """Create and persist a JobStatus row.
+
+    ``overrides`` carries user-supplied field values that must survive the
+    agent run (e.g. a manual mood correction made alongside a text edit).
+    """
     job = JobStatus(
         user_id=user_id,
         memory_id=memory_id,
         task_type=task_type,
         status=status,
         progress=0.0,
+        overrides=overrides,
     )
     db.add(job)
     await db.commit()

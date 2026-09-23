@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from datetime import datetime
 
 from app.jobs.scheduler import (
     get_session_factory,
@@ -184,6 +185,52 @@ async def _run_enrichment(memory: Memory, db: AsyncSession) -> None:
         memory.review_reason = None
 
 
+def _apply_overrides(memory: Memory, overrides: dict | None) -> None:
+    """Re-apply user-supplied values after an agent has rewritten the memory.
+
+    Without this, editing a memory's text would trigger reprocessing that
+    overwrites any title/mood/tags/date the user set in the same request.
+    """
+    if not overrides:
+        return
+
+    content = memory.structured_content if isinstance(memory.structured_content, dict) else {}
+    content = dict(content)
+
+    if overrides.get("title") is not None:
+        content["title"] = overrides["title"]
+    if overrides.get("summary") is not None:
+        content["summary"] = overrides["summary"]
+    if overrides.get("tags"):
+        memory.tags = [str(tag).lower()[:50] for tag in overrides["tags"] if tag]
+    if overrides.get("mood"):
+        memory.mood = str(overrides["mood"])[:50]
+    if overrides.get("importance_level") is not None:
+        memory.importance_level = int(overrides["importance_level"])
+    if overrides.get("event_date"):
+        try:
+            content["event_date"] = overrides["event_date"]
+            memory.event_date = datetime.fromisoformat(
+                str(overrides["event_date"]).replace("Z", "+00:00")
+            )
+        except (TypeError, ValueError):
+            pass
+    if overrides.get("people") is not None:
+        content["people"] = [str(p) for p in overrides["people"] if p]
+    if overrides.get("location") is not None:
+        content["location"] = overrides["location"]
+
+    memory.structured_content = content
+
+    # Overrides may have supplied (or not) a date; keep review state honest.
+    if memory.event_date is None:
+        memory.needs_review = True
+        memory.review_reason = "missing_date"
+    else:
+        memory.needs_review = False
+        memory.review_reason = None
+
+
 async def run_tracked_job(job_id: str) -> None:
     """Execute the JobStatus row with the given id.
 
@@ -212,20 +259,24 @@ async def run_tracked_job(job_id: str) -> None:
                 if memory is None:
                     raise ValueError("Memory not found for refinement job")
                 await _run_refinement(memory, db)
+                # Preserve user edits made alongside a text change.
+                _apply_overrides(memory, job.overrides)
                 memory.processing_state = "refined"
                 await update_job_status(db, job, "completed", progress=1.0)
 
-                # Chain enrichment job.
+                # Chain enrichment job, carrying the overrides forward so they
+                # are applied again after enrichment rewrites the content.
                 enrichment_job = await create_job_status(
                     db=db,
                     user_id=str(job.user_id),
                     memory_id=str(memory.id),
                     task_type="enrichment",
                     status="pending",
+                    overrides=job.overrides,
                 )
-                # Chain enrichment job. Only schedule it if the scheduler is
-                # actually running; otherwise run inline. Doing both would
-                # execute enrichment twice and race on the memory row.
+                # Only schedule it if the scheduler is actually running;
+                # otherwise run inline. Doing both would execute enrichment
+                # twice and race on the memory row.
                 if scheduler.running:
                     schedule_job(str(enrichment_job.id))
                 else:
@@ -235,6 +286,9 @@ async def run_tracked_job(job_id: str) -> None:
                 if memory is None:
                     raise ValueError("Memory not found for enrichment job")
                 await _run_enrichment(memory, db)
+                # Enrichment rewrites structured_content last, so re-apply user
+                # edits here to guarantee they win.
+                _apply_overrides(memory, job.overrides)
                 memory.processing_state = "enriched"
                 await update_job_status(db, job, "completed", progress=1.0)
 

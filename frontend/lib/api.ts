@@ -199,8 +199,7 @@ export const api = {
       importance_level?: number;
       event_date?: string;
     }
-  ) => request("PATCH", `/memories/${id}`, update),
-  deleteMemory: (id: string) => request("DELETE", `/memories/${id}`),
+  ) => request("PATCH", `/memories/${id}`, update),  deleteMemory: (id: string) => request("DELETE", `/memories/${id}`),
 
   generateStory: (data: {
     memory_ids: string[];

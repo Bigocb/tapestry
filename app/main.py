@@ -42,6 +42,9 @@ async def _apply_pending_migrations() -> None:
                 text("ALTER TABLE memories ADD COLUMN review_reason VARCHAR(50)")
             )
             print("Added missing review_reason column to memories table.")
+        if not await conn.run_sync(_has_column, "job_status", "overrides"):
+            await conn.execute(text("ALTER TABLE job_status ADD COLUMN overrides JSON"))
+            print("Added missing overrides column to job_status table.")
 
         # Backfill: memories captured before the review queue existed that have
         # no event date would otherwise be invisible -- excluded from the

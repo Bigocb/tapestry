@@ -323,3 +323,116 @@ class TestDatetimeContentPersists:
         import json
 
         json.dumps(memory.structured_content)
+
+
+class TestEditTriggersReprocessing:
+    """Editing the source text requeues the memory; metadata edits do not."""
+
+    async def _capture(self, client, token, text="Original text about the trip."):
+        response = client.post(
+            "/api/memories/capture/text",
+            json={"raw_input": text},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert response.status_code == 201
+        return response.json()["id"]
+
+    @pytest.mark.asyncio
+    async def test_editing_raw_input_reruns_agents(
+        self, client, test_db, setup_users, get_auth_token, fake_structure_memory
+    ):
+        await setup_users()
+        token = get_auth_token("alice", "password123")
+        memory_id = await self._capture(client, token)
+
+        # One refinement job from capture.
+        before = await test_db.execute(
+            select(JobStatus).where(
+                JobStatus.memory_id == memory_id,
+                JobStatus.task_type == "refinement",
+            )
+        )
+        assert len(before.scalars().all()) == 1
+
+        response = client.patch(
+            f"/api/memories/{memory_id}",
+            json={"raw_input": "A completely different memory about work."},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert response.status_code == 200
+
+        after = await test_db.execute(
+            select(JobStatus).where(
+                JobStatus.memory_id == memory_id,
+                JobStatus.task_type == "refinement",
+            )
+        )
+        refinement_jobs = after.scalars().all()
+        assert len(refinement_jobs) == 2
+
+        mem_result = await test_db.execute(
+            select(Memory).where(Memory.id == UUID(memory_id))
+        )
+        assert mem_result.scalar_one().processing_state == "enriched"
+
+    @pytest.mark.asyncio
+    async def test_metadata_edit_does_not_rerun_agents(
+        self, client, test_db, setup_users, get_auth_token, fake_structure_memory
+    ):
+        await setup_users()
+        token = get_auth_token("alice", "password123")
+        memory_id = await self._capture(client, token)
+
+        response = client.patch(
+            f"/api/memories/{memory_id}",
+            json={"mood": "happy", "importance_level": 3, "title": "Manual title"},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert response.status_code == 200
+
+        jobs = await test_db.execute(
+            select(JobStatus).where(
+                JobStatus.memory_id == memory_id,
+                JobStatus.task_type == "refinement",
+            )
+        )
+        # Still just the capture-time job.
+        assert len(jobs.scalars().all()) == 1
+
+        mem_result = await test_db.execute(
+            select(Memory).where(Memory.id == UUID(memory_id))
+        )
+        memory = mem_result.scalar_one()
+        assert memory.mood == "happy"
+        assert memory.importance_level == 3
+
+    @pytest.mark.asyncio
+    async def test_user_edits_survive_reprocessing(
+        self, client, test_db, setup_users, get_auth_token, fake_structure_memory
+    ):
+        """A manual correction sent with a text edit must not be clobbered."""
+        await setup_users()
+        token = get_auth_token("alice", "password123")
+        memory_id = await self._capture(client, token)
+
+        response = client.patch(
+            f"/api/memories/{memory_id}",
+            json={
+                "raw_input": "Rewritten source text.",
+                "mood": "determined",
+                "importance_level": 9,
+                "title": "My chosen title",
+            },
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert response.status_code == 200
+
+        mem_result = await test_db.execute(
+            select(Memory).where(Memory.id == UUID(memory_id))
+        )
+        memory = mem_result.scalar_one()
+        # The stub agents would set mood=neutral/importance=5/title=Structured:...
+        # so if overrides failed, these would not match.
+        assert memory.mood == "determined"
+        assert memory.importance_level == 9
+        assert memory.structured_content["title"] == "My chosen title"

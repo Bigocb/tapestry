@@ -228,6 +228,10 @@ class JobStatus(Base):
     progress = Column(Float, default=0.0, nullable=False)  # 0-1
     error = Column(Text, nullable=True)
 
+    # User edits captured at the time the job was queued. Applied after the
+    # agents run so an explicit correction is not clobbered by derived output.
+    overrides = Column(DBJSON(), nullable=True)
+
     created_at = Column(TIMESTAMP, server_default=func.now(), nullable=False)
     updated_at = Column(
         TIMESTAMP, server_default=func.now(), onupdate=func.now(), nullable=False
