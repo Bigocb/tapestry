@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import datetime
 from typing import Optional
 
-from app.db import get_db, Memory, User
+from app.db import get_db, Memory, User, as_utc
 from app.dependencies import get_current_user
 from app.models.schemas import MemoryResponse
 from app.routes.memories import _memory_response
@@ -20,8 +20,8 @@ router = APIRouter()
 
 
 def _timeline_date(memory: Memory) -> datetime:
-    """Return the date used to place a memory on the timeline."""
-    return memory.event_date or memory.created_at
+    """Return the (UTC-aware) date used to place a memory on the timeline."""
+    return as_utc(memory.event_date)
 
 
 def _matches_timeline_filters(
@@ -37,11 +37,11 @@ def _matches_timeline_filters(
     if memory.event_date is None:
         return False
 
-    memory_date = memory.event_date
+    memory_date = as_utc(memory.event_date)
 
-    if start_date and memory_date < start_date:
+    if start_date and memory_date < as_utc(start_date):
         return False
-    if end_date and memory_date > end_date:
+    if end_date and memory_date > as_utc(end_date):
         return False
 
     if mood and memory.mood != mood:

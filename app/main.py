@@ -9,6 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 
 from sqlalchemy import inspect, text
+from datetime import timezone
 
 # Import routes
 from app.routes import auth, memories, stories, wiki, timeline, insights, review
@@ -59,9 +60,12 @@ async def _apply_pending_migrations() -> None:
         for memory_id, raw_input in rows:
             parsed = _extract_event_date(raw_input or "")
             if parsed is not None:
+                # Store naive UTC so these rows match ORM-written timestamps
+                # (SQLite drops tzinfo anyway). Read paths normalise regardless.
+                stored = parsed.astimezone(timezone.utc).replace(tzinfo=None)
                 await conn.execute(
                     text("UPDATE memories SET event_date = :d WHERE id = :i"),
-                    {"d": parsed, "i": memory_id},
+                    {"d": stored, "i": memory_id},
                 )
                 recovered += 1
             else:

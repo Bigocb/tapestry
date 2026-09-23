@@ -18,7 +18,7 @@ from sqlalchemy import select
 from uuid import UUID
 import uuid
 
-from app.db import get_db, Memory, User, JobStatus
+from app.db import get_db, Memory, User, JobStatus, as_utc
 from app.agents.capture import structure_memory
 from app.agents.embeddings import (
     cosine_similarity,
@@ -384,9 +384,10 @@ def _matches_filters(memory: Memory, filters: SearchFilters | None) -> bool:
     if filters is None:
         return True
 
-    if filters.date_range_start and memory.created_at < filters.date_range_start:
+    created = as_utc(memory.created_at)
+    if filters.date_range_start and created < as_utc(filters.date_range_start):
         return False
-    if filters.date_range_end and memory.created_at > filters.date_range_end:
+    if filters.date_range_end and created > as_utc(filters.date_range_end):
         return False
 
     if filters.mood and memory.mood != filters.mood:

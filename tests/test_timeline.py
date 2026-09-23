@@ -117,6 +117,45 @@ class TestTimelineChronologicalOrder:
     """Timeline returns memories ordered by event date."""
 
     @pytest.mark.asyncio
+    async def test_timeline_handles_mixed_naive_and_aware_dates(
+        self, client, test_db, setup_users, get_auth_token
+    ):
+        """Mixed tz-aware and tz-naive event_date values must not crash.
+
+        Legacy rows can store an aware datetime (e.g. written via raw SQL by
+        the backfill migration) while ORM-written rows are naive, and comparing
+        them raises TypeError: can't compare offset-naive and offset-aware.
+        """
+        from sqlalchemy import text as sql_text
+
+        user1, _ = await setup_users()
+        token = get_auth_token("alice", "password123")
+
+        aware = await _seed_memory(
+            test_db, str(user1.id), "aware", "Aware", created_at=datetime(2024, 1, 1, 12, 0, 0)
+        )
+        naive = await _seed_memory(
+            test_db, str(user1.id), "naive", "Naive", created_at=datetime(2024, 6, 1, 12, 0, 0)
+        )
+
+        # Mimic the backfill migration: write a tz-aware value via raw SQL so
+        # SQLite stores the explicit offset, while the ORM row stays naive.
+        await test_db.execute(
+            sql_text("UPDATE memories SET event_date = :d WHERE id = :i"),
+            {"d": datetime(2024, 1, 1, 12, 0, 0, tzinfo=timezone.utc), "i": str(aware.id)},
+        )
+        await test_db.commit()
+
+        response = client.get(
+            "/api/timeline",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        assert response.status_code == 200
+        titles = [item["title"] for item in response.json()]
+        assert titles == ["Naive", "Aware"]
+
+    @pytest.mark.asyncio
     async def test_timeline_returns_memories_chronologically(
         self, client, test_db, setup_users, get_auth_token
     ):

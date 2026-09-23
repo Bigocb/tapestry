@@ -76,11 +76,19 @@ async function request(
   if (token) headers["Authorization"] = `Bearer ${token}`;
   if (body) headers["Content-Type"] = "application/json";
 
-  const response = await fetch(url.toString(), {
-    method,
-    headers,
-    body: body ? JSON.stringify(body) : undefined,
-  });
+  let response: Response;
+  try {
+    response = await fetch(url.toString(), {
+      method,
+      headers,
+      body: body ? JSON.stringify(body) : undefined,
+    });
+  } catch {
+    // fetch only rejects on network-level failures. A server error that
+    // crashes before CORS headers are attached also lands here, so don't claim
+    // the server is unreachable when it may simply have errored.
+    throw new Error(`Could not reach the server (${method} ${path}).`);
+  }
 
   if (response.status === 204) return null;
 
@@ -97,6 +105,11 @@ async function request(
 
   const data = await response.json().catch(() => null);
   if (!response.ok) {
+    if (response.status >= 500) {
+      throw new Error(
+        data?.detail || `Server error (${response.status}) on ${method} ${path}.`
+      );
+    }
     throw new Error(data?.detail || `Request failed: ${response.status}`);
   }
   return data;
