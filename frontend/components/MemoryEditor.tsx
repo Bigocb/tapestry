@@ -85,80 +85,115 @@ export function MemoryEditor({ id }: { id: string }) {
     original !== null && memory.raw_input !== original.raw_input;
 
   return (
-    <form onSubmit={save} className="max-w-2xl mx-auto space-y-4">
+    <form onSubmit={save} className="max-w-2xl mx-auto space-y-6">
       <h1 className="text-2xl font-bold">Edit memory</h1>
 
-      <label className="block">
-        Original text
-        <textarea
-          className="w-full border rounded p-3 h-40"
-          placeholder="The memory as you told it"
-          value={memory.raw_input || ""}
-          onChange={(e) => update("raw_input", e.target.value)}
-        />
-      </label>
-      {sourceChanged && (
-        <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded p-2">
-          You changed the original text. Saving will re-run the AI to re-extract
-          the title, summary, entities, mood and date. Fields you edited here
-          will be kept.
-        </p>
-      )}
+      <section className="space-y-1">
+        <Field
+          label="Original text"
+          hint="The memory exactly as you told it. This is the source everything else is derived from."
+        >
+          <textarea
+            className="w-full border rounded p-3 h-40"
+            placeholder="e.g. On May 25th 2011, Maxwell Joseph Francis Cloutier was born."
+            value={memory.raw_input || ""}
+            onChange={(e) => update("raw_input", e.target.value)}
+          />
+        </Field>
+        {sourceChanged ? (
+          <p className="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded p-2">
+            <strong>You changed the original text.</strong> Saving re-runs the AI
+            to regenerate the title, summary, mood, tags and date below. Any
+            field you edited on this screen is kept as you set it.
+          </p>
+        ) : (
+          <p className="text-xs text-gray-500">
+            Change this only if the memory itself was recorded wrong — the AI
+            will re-read it and rebuild the fields below.
+          </p>
+        )}
+      </section>
 
-      <input
-        type="text"
-        placeholder="Title"
-        className="w-full border rounded p-2"
-        value={memory.title || ""}
-        onChange={(e) => update("title", e.target.value)}
-      />
-      <textarea
-        className="w-full border rounded p-3 h-32"
-        placeholder="Summary"
-        value={memory.summary || ""}
-        onChange={(e) => update("summary", e.target.value)}
-      />
-      <div className="grid grid-cols-2 gap-4">
-        <input
-          type="text"
-          placeholder="Mood"
-          className="border rounded p-2"
-          value={memory.mood || ""}
-          onChange={(e) => update("mood", e.target.value)}
-        />
-        <input
-          type="text"
-          placeholder="Location"
-          className="border rounded p-2"
-          value={memory.location || ""}
-          onChange={(e) => update("location", e.target.value)}
-        />
-        <input
-          type="text"
-          placeholder="Tags (comma separated)"
-          className="border rounded p-2"
-          value={(memory.tags || []).join(", ")}
-          onChange={(e) =>
-            update(
-              "tags",
-              e.target.value.split(",").map((t) => t.trim()).filter(Boolean)
-            )
-          }
-        />
-        <input
-          type="text"
-          placeholder="People (comma separated)"
-          className="border rounded p-2"
-          value={(memory.people || []).join(", ")}
-          onChange={(e) =>
-            update(
-              "people",
-              e.target.value.split(",").map((p) => p.trim()).filter(Boolean)
-            )
-          }
-        />
-        <label className="block col-span-2">
-          Event date
+      <hr className="border-gray-200" />
+
+      <section className="space-y-4">
+        <h2 className="font-semibold text-gray-800">Details</h2>
+        <Field
+          label="Title"
+          hint="Short heading, shown in lists and on the timeline."
+        >
+          <input
+            type="text"
+            className="w-full border rounded p-2"
+            placeholder="e.g. Birth of Maxwell Joseph Francis Cloutier"
+            value={memory.title || ""}
+            onChange={(e) => update("title", e.target.value)}
+          />
+        </Field>
+        <Field
+          label="Summary"
+          hint="One or two sentences describing the memory."
+        >
+          <textarea
+            className="w-full border rounded p-3 h-28"
+            placeholder="e.g. Maxwell was born on May 25, 2011."
+            value={memory.summary || ""}
+            onChange={(e) => update("summary", e.target.value)}
+          />
+        </Field>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <Field label="Mood" hint="One word, e.g. joyful.">
+            <input
+              type="text"
+              className="w-full border rounded p-2"
+              placeholder="joyful"
+              value={memory.mood || ""}
+              onChange={(e) => update("mood", e.target.value)}
+            />
+          </Field>
+          <Field label="Location" hint="Where it happened, if relevant.">
+            <input
+              type="text"
+              className="w-full border rounded p-2"
+              placeholder="e.g. Conway, South Carolina"
+              value={memory.location || ""}
+              onChange={(e) => update("location", e.target.value)}
+            />
+          </Field>
+          <Field label="Tags" hint="Comma separated. Used for filtering.">
+            <input
+              type="text"
+              className="w-full border rounded p-2"
+              placeholder="birth, family, milestone"
+              value={(memory.tags || []).join(", ")}
+              onChange={(e) =>
+                update(
+                  "tags",
+                  e.target.value.split(",").map((t) => t.trim()).filter(Boolean)
+                )
+              }
+            />
+          </Field>
+          <Field label="People" hint="Comma separated names mentioned.">
+            <input
+              type="text"
+              className="w-full border rounded p-2"
+              placeholder="Maxwell Joseph Francis Cloutier"
+              value={(memory.people || []).join(", ")}
+              onChange={(e) =>
+                update(
+                  "people",
+                  e.target.value.split(",").map((p) => p.trim()).filter(Boolean)
+                )
+              }
+            />
+          </Field>
+        </div>
+
+        <Field
+          label="Event date"
+          hint="When the memory happened. This places it on your timeline — without it, the memory is hidden from the timeline and listed under Review."
+        >
           <input
             type="datetime-local"
             className="w-full border rounded p-2"
@@ -174,20 +209,23 @@ export function MemoryEditor({ id }: { id: string }) {
               )
             }
           />
-        </label>
-      </div>
-      <label className="block">
-        Importance (1-10)
-        <input
-          type="range"
-          min={1}
-          max={10}
-          value={memory.importance_level || 5}
-          onChange={(e) => update("importance_level", Number(e.target.value))}
-          className="w-full"
-        />
-        <span className="text-sm text-gray-500">{memory.importance_level || 5}</span>
-      </label>
+        </Field>
+
+        <Field
+          label={`Importance: ${memory.importance_level || 5}/10`}
+          hint="How significant this memory is, 1 (minor) to 10 (life-changing)."
+        >
+          <input
+            type="range"
+            min={1}
+            max={10}
+            value={memory.importance_level || 5}
+            onChange={(e) => update("importance_level", Number(e.target.value))}
+            className="w-full"
+          />
+        </Field>
+      </section>
+
       <div className="flex gap-3">
         <button
           type="submit"
@@ -206,5 +244,23 @@ export function MemoryEditor({ id }: { id: string }) {
       </div>
       {error && <p className="text-red-600">{error}</p>}
     </form>
+  );
+}
+
+function Field({
+  label,
+  hint,
+  children,
+}: {
+  label: string;
+  hint?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <label className="block">
+      <span className="block font-medium text-sm text-gray-800 mb-1">{label}</span>
+      {children}
+      {hint && <span className="block text-xs text-gray-500 mt-1">{hint}</span>}
+    </label>
   );
 }
