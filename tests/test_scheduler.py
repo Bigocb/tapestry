@@ -7,6 +7,8 @@ from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker
 from uuid import UUID
 
+from datetime import datetime, timezone
+
 from app.main import app
 from app.db import Base, User, Memory, JobStatus, get_db
 from app.security import hash_password
@@ -261,3 +263,63 @@ class TestJobFailureHandling:
         memory = mem_result.scalar_one_or_none()
         assert memory is not None
         assert memory.processing_state == "refinement_failed"
+
+
+class TestDatetimeContentPersists:
+    """Regression: structured_content containing a datetime must persist.
+
+    StructuredMemory.event_date is a datetime. Writing it through the job
+    worker previously used model_dump() (not mode='json'), which is not
+    JSON-serializable, so the flush raised and the whole job transaction
+    rolled back -- leaving the memory stuck at 'capturing'.
+    """
+
+    @pytest.mark.asyncio
+    async def test_refinement_with_event_date_reaches_enriched(
+        self,
+        client,
+        test_db,
+        setup_users,
+        get_auth_token,
+        monkeypatch,
+    ):
+        await setup_users()
+        token = get_auth_token("alice", "password123")
+
+        async def fake_refine(raw_input, structured_content, recent_memories):
+            return StructuredMemory(
+                title="Dated memory",
+                summary=raw_input,
+                entities=[EntityData(type="date", value="July 29, 1976")],
+                mood="neutral",
+                importance_level=6,
+                initial_tags=["birth"],
+                event_date=datetime(1976, 7, 29, tzinfo=timezone.utc),
+            )
+
+        from app.jobs import worker
+
+        monkeypatch.setattr(worker, "refine_memory", fake_refine)
+
+        response = client.post(
+            "/api/memories/capture/text",
+            json={"raw_input": "I was born on July 29, 1976."},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        assert response.status_code == 201
+        memory_id = response.json()["id"]
+
+        stmt = select(Memory).where(Memory.id == UUID(memory_id))
+        result = await test_db.execute(stmt)
+        memory = result.scalar_one_or_none()
+
+        assert memory is not None
+        # Must not be stuck at 'capturing' (the pre-fix symptom).
+        assert memory.processing_state == "enriched"
+        assert isinstance(memory.structured_content, dict)
+        assert memory.event_date is not None
+        # The persisted content must be JSON-serializable.
+        import json
+
+        json.dumps(memory.structured_content)

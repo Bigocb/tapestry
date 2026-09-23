@@ -24,7 +24,6 @@ from app.agents.embeddings import (
     cosine_similarity,
     deserialize_embedding,
     generate_embedding,
-    serialize_embedding,
 )
 from app.agents.search import parse_search_query
 from app.jobs import scheduler as scheduler_module
@@ -52,155 +51,6 @@ def get_background_session_factory():
     return scheduler_module.BackgroundSessionLocal
 
 
-async def _fetch_recent_memories(
-    db: AsyncSession, user_id: str, exclude_memory_id: str, limit: int = 5
-) -> list[dict]:
-    """Fetch the user's most recent memories (excluding the given one) as context."""
-    from sqlalchemy import desc
-
-    stmt = (
-        select(Memory)
-        .where(Memory.user_id == user_id)
-        .where(Memory.id != exclude_memory_id)
-        .order_by(desc(Memory.created_at))
-        .limit(limit)
-    )
-    result = await db.execute(stmt)
-    memories = result.scalars().all()
-
-    context = []
-    for mem in memories:
-        content = mem.structured_content or {}
-        context.append(
-            {
-                "title": content.get("title", "Untitled")
-                if isinstance(content, dict)
-                else "Untitled",
-                "summary": content.get("summary", "")
-                if isinstance(content, dict)
-                else "",
-                "entities": content.get("entities", [])
-                if isinstance(content, dict)
-                else [],
-                "created_at": mem.created_at.isoformat() if mem.created_at else None,
-            }
-        )
-    return context
-
-
-async def _generate_embedding_for_memory(memory: Memory) -> None:
-    """Generate and attach an embedding from the memory's searchable text.
-
-    Uses the memory title + summary when available, otherwise raw_input.
-    """
-    content = memory.structured_content or {}
-    if isinstance(content, dict):
-        searchable_parts = [
-            content.get("title", ""),
-            content.get("summary", ""),
-            memory.raw_input,
-        ]
-    else:
-        searchable_parts = [memory.raw_input]
-
-    searchable_text = " ".join(part for part in searchable_parts if part).strip()
-    embedding = await generate_embedding(searchable_text)
-    memory.embedding = serialize_embedding(embedding) if embedding else None
-
-
-async def _find_similar_memories(
-    db: AsyncSession,
-    memory: Memory,
-    exclude_memory_id: str,
-    limit: int = 5,
-) -> list[dict]:
-    """Find the top-k memories most similar to the given memory by embedding."""
-    from sqlalchemy import desc
-
-    target_embedding = deserialize_embedding(memory.embedding)
-    if not target_embedding:
-        return []
-
-    stmt = (
-        select(Memory)
-        .where(Memory.user_id == memory.user_id)
-        .where(Memory.id != exclude_memory_id)
-        .where(Memory.embedding.is_not(None))
-        .order_by(desc(Memory.created_at))
-    )
-    result = await db.execute(stmt)
-    memories = result.scalars().all()
-
-    scored = []
-    for mem in memories:
-        embedding = deserialize_embedding(mem.embedding)
-        if not embedding or len(embedding) != len(target_embedding):
-            continue
-        score = cosine_similarity(target_embedding, embedding)
-        scored.append((score, mem))
-
-    scored.sort(key=lambda item: item[0], reverse=True)
-    top = scored[:limit]
-
-    similar = []
-    for score, mem in top:
-        content = mem.structured_content or {}
-        similar.append(
-            {
-                "memory_id": str(mem.id),
-                "title": content.get("title") if isinstance(content, dict) else None,
-                "summary": content.get("summary")
-                if isinstance(content, dict)
-                else None,
-                "score": round(float(score), 4),
-            }
-        )
-    return similar
-
-
-async def _run_refinement(memory: Memory, db: AsyncSession) -> None:
-    """Run the Refinement Agent on a memory."""
-    recent_memories = await _fetch_recent_memories(
-        db=db,
-        user_id=str(memory.user_id),
-        exclude_memory_id=str(memory.id),
-    )
-    refined = await refine_memory(
-        raw_input=memory.raw_input,
-        structured_content=memory.structured_content or {},
-        recent_memories=recent_memories,
-    )
-
-    memory.structured_content = refined.model_dump(mode="json")
-    memory.mood = refined.mood
-    memory.importance_level = refined.importance_level
-    memory.tags = refined.initial_tags
-    memory.event_date = refined.event_date
-
-
-async def _run_enrichment(memory: Memory, db: AsyncSession) -> None:
-    """Run the Enrichment Agent on a memory using similar memories as context."""
-    await _generate_embedding_for_memory(memory)
-
-    similar_memories = await _find_similar_memories(
-        db=db,
-        memory=memory,
-        exclude_memory_id=str(memory.id),
-        limit=5,
-    )
-
-    enriched, related_ids = await enrich_memory(
-        memory=memory.structured_content or {},
-        similar_memories=similar_memories,
-    )
-
-    memory.structured_content = enriched.model_dump(mode="json")
-    memory.mood = enriched.mood
-    memory.importance_level = enriched.importance_level
-    memory.tags = enriched.initial_tags
-    memory.event_date = enriched.event_date
-    memory.related_memory_ids = related_ids
-
 
 async def _schedule_refinement(memory_id: str, user_id: str) -> None:
     """Queue refinement and enrichment jobs for a captured memory.
@@ -209,9 +59,10 @@ async def _schedule_refinement(memory_id: str, user_id: str) -> None:
     capture endpoint returns. A JobStatus row is created for each stage so
     progress and errors are observable.
 
-    When called through FastAPI BackgroundTasks (as in tests), this function
-    is executed inline after the response, so we also directly run the
-    refinement job to ensure tests observe completed job status.
+    When the scheduler is not running (e.g. under TestClient, which does not
+    run the FastAPI lifespan), the job is executed inline instead so tests
+    observe completed job status. We never do both, otherwise the job would
+    run twice and the two runs would race on the same memory row.
     """
     from app.jobs.worker import run_tracked_job
 
@@ -225,10 +76,11 @@ async def _schedule_refinement(memory_id: str, user_id: str) -> None:
             task_type="refinement",
             status="pending",
         )
-        schedule_job(str(refinement_job.id))
 
-        # Run inline when executed by FastAPI BackgroundTasks.
-        await run_tracked_job(str(refinement_job.id))
+        if scheduler_module.scheduler.running:
+            schedule_job(str(refinement_job.id))
+        else:
+            await run_tracked_job(str(refinement_job.id))
 
 
 async def _transcribe_audio(audio_bytes: bytes) -> str:

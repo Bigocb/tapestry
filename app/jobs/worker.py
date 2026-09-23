@@ -12,7 +12,13 @@ from __future__ import annotations
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
-from app.jobs.scheduler import get_session_factory, update_job_status, create_job_status, schedule_job
+from app.jobs.scheduler import (
+    get_session_factory,
+    update_job_status,
+    create_job_status,
+    schedule_job,
+    scheduler,
+)
 from app.db import Memory, JobStatus
 from app.agents.embeddings import (
     cosine_similarity,
@@ -140,10 +146,11 @@ async def _run_refinement(memory: Memory, db: AsyncSession) -> None:
         recent_memories=recent_memories,
     )
 
-    memory.structured_content = refined.model_dump()
+    memory.structured_content = refined.model_dump(mode="json")
     memory.mood = refined.mood
     memory.importance_level = refined.importance_level
     memory.tags = refined.initial_tags
+    memory.event_date = refined.event_date
 
 
 async def _run_enrichment(memory: Memory, db: AsyncSession) -> None:
@@ -162,10 +169,11 @@ async def _run_enrichment(memory: Memory, db: AsyncSession) -> None:
         similar_memories=similar_memories,
     )
 
-    memory.structured_content = enriched.model_dump()
+    memory.structured_content = enriched.model_dump(mode="json")
     memory.mood = enriched.mood
     memory.importance_level = enriched.importance_level
     memory.tags = enriched.initial_tags
+    memory.event_date = enriched.event_date
     memory.related_memory_ids = related_ids
 
 
@@ -208,8 +216,13 @@ async def run_tracked_job(job_id: str) -> None:
                     task_type="enrichment",
                     status="pending",
                 )
-                schedule_job(str(enrichment_job.id))
-                await run_tracked_job(str(enrichment_job.id))
+                # Chain enrichment job. Only schedule it if the scheduler is
+                # actually running; otherwise run inline. Doing both would
+                # execute enrichment twice and race on the memory row.
+                if scheduler.running:
+                    schedule_job(str(enrichment_job.id))
+                else:
+                    await run_tracked_job(str(enrichment_job.id))
 
             elif job.task_type == "enrichment":
                 if memory is None:
@@ -223,9 +236,27 @@ async def run_tracked_job(job_id: str) -> None:
 
             await db.commit()
         except Exception as exc:
+            # A flush failure leaves the session rolled back and its ORM
+            # instances expired. Roll back explicitly, then re-fetch the rows by
+            # id (touching the expired instances directly would trigger a lazy
+            # sync load and raise MissingGreenlet).
+            await db.rollback()
+
+            fresh_job = (
+                await db.execute(select(JobStatus).where(JobStatus.id == job_id))
+            ).scalar_one_or_none()
+
             if memory is not None:
-                memory.processing_state = f"{job.task_type}_failed"
-            await update_job_status(db, job, "failed", error=str(exc))
+                fresh_memory = (
+                    await db.execute(
+                        select(Memory).where(Memory.id == job.memory_id)
+                    )
+                ).scalar_one_or_none()
+                if fresh_memory is not None:
+                    fresh_memory.processing_state = f"{fresh_job.task_type}_failed"
+
+            if fresh_job is not None:
+                await update_job_status(db, fresh_job, "failed", error=str(exc))
             await db.commit()
             # Do not propagate: background jobs should record failure without
             # breaking the capture response.
