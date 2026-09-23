@@ -256,8 +256,8 @@ function MemoryPreview({ memory }: { memory: any }) {
   return (
     <div className="border rounded p-4 bg-green-50">
       <h3 className="font-semibold text-green-800">Memory captured</h3>
-      <p className="text-sm text-gray-600">Status: {memory.state}</p>
-      <p className="mt-2">{memory.refined_text || memory.raw_input}</p>
+      <p className="text-sm text-gray-600">Status: {memory.processing_state}</p>
+      <p className="mt-2">{memory.summary || memory.raw_input}</p>
       {memory.tags?.length > 0 && (
         <p className="text-sm mt-2">Tags: {memory.tags.join(", ")}</p>
       )}

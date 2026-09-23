@@ -50,7 +50,7 @@ export function Timeline() {
                     href={`/memories/${memory.id}`}
                     className="font-medium hover:text-indigo-600"
                   >
-                    {memory.title || memory.refined_text || memory.raw_input}
+                    {memory.title || memory.summary || memory.raw_input}
                   </Link>
                   <p className="text-sm text-gray-500">
                     {new Date(memory.event_date || memory.created_at).toLocaleTimeString([], {

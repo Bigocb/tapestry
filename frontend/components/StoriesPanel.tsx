@@ -101,7 +101,7 @@ export function StoriesPanel() {
                   onChange={() => toggle(memory.id)}
                 />
                 <span className="text-sm">
-                  {memory.title || memory.refined_text || memory.raw_input}
+                  {memory.title || memory.summary || memory.raw_input}
                 </span>
               </label>
             ))}

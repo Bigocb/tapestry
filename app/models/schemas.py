@@ -1,6 +1,6 @@
 """Pydantic schemas for MEMIND API and data validation."""
 
-from pydantic import BaseModel, Field, EmailStr, field_validator
+from pydantic import BaseModel, ConfigDict, Field, EmailStr, field_validator
 from typing import Optional, List, Union
 from datetime import datetime
 from uuid import UUID
@@ -182,10 +182,19 @@ class MemoryFormCapture(BaseModel):
 
 
 class MemoryUpdate(BaseModel):
-    """Update request for a memory."""
+    """Update request for a memory.
+
+    Unknown fields are rejected (``extra="forbid"``) rather than silently
+    ignored. Pydantic's default is to drop them, which previously meant a
+    frontend sending a misspelled field got a 200 while the edit vanished.
+    """
+
+    model_config = ConfigDict(extra="forbid")
 
     raw_input: Optional[str] = None
     structured_content: Optional[StructuredMemory] = None
+    title: Optional[str] = Field(None, max_length=255)
+    summary: Optional[str] = None
     tags: Optional[List[str]] = None
     mood: Optional[str] = None
     importance_level: Optional[int] = Field(None, ge=1, le=10)

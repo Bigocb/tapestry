@@ -193,6 +193,107 @@ class TestMemoryUpdate:
         assert data["event_date"] is not None
 
     @pytest.mark.asyncio
+    async def test_update_persists_title_and_summary(
+        self, client, test_db, setup_users, get_auth_token
+    ):
+        """The editor's payload (title + body) must actually persist.
+
+        MemoryUpdate previously had no `title`/`summary` field and Pydantic
+        silently ignored unknown keys, so saving returned 200 while discarding
+        the user's edits.
+        """
+        user1, _ = await setup_users()
+        token = get_auth_token("alice", "password123")
+        memory = await _seed_memory(test_db, str(user1.id), "original body", "Original")
+
+        response = client.patch(
+            f"/api/memories/{memory.id}",
+            json={"title": "New Title", "summary": "New body text."},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["title"] == "New Title"
+        assert data["summary"] == "New body text."
+
+        # And it must be read back on a fresh request.
+        follow_up = client.get(
+            f"/api/memories/{memory.id}",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert follow_up.json()["title"] == "New Title"
+        assert follow_up.json()["summary"] == "New body text."
+
+    @pytest.mark.asyncio
+    async def test_update_rejects_unknown_fields(
+        self, client, test_db, setup_users, get_auth_token
+    ):
+        """Unknown fields must fail loudly instead of being silently dropped.
+
+        This is the guard that stops frontend/backend field drift from turning
+        into silent data loss.
+        """
+        user1, _ = await setup_users()
+        token = get_auth_token("alice", "password123")
+        memory = await _seed_memory(test_db, str(user1.id), "text", "Title")
+
+        response = client.patch(
+            f"/api/memories/{memory.id}",
+            json={"not_a_real_field": "value"},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        assert response.status_code == 422
+
+    @pytest.mark.asyncio
+    async def test_user_edit_wins_over_stored_structured_content(
+        self, client, test_db, setup_users, get_auth_token
+    ):
+        """An explicit edit must not be clobbered by stale agent-derived values.
+
+        The enrichment agent writes importance_level/mood into
+        structured_content. Re-reading those after applying the user's update
+        used to overwrite the user's value.
+        """
+        user1, _ = await setup_users()
+        token = get_auth_token("alice", "password123")
+
+        memory = Memory(
+            raw_input="text",
+            input_type="text",
+            user_id=str(user1.id),
+            structured_content={
+                "title": "T",
+                "summary": "S",
+                "entities": [],
+                "mood": "neutral",
+                "importance_level": 8,
+                "initial_tags": ["old"],
+            },
+            tags=["old"],
+            mood="neutral",
+            importance_level=8,
+            processing_state="enriched",
+            related_memory_ids=[],
+        )
+        test_db.add(memory)
+        await test_db.commit()
+        await test_db.refresh(memory)
+
+        response = client.patch(
+            f"/api/memories/{memory.id}",
+            json={"importance_level": 2, "mood": "excited", "tags": ["brand-new"]},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["importance_level"] == 2
+        assert data["mood"] == "excited"
+        assert data["tags"] == ["brand-new"]
+
+    @pytest.mark.asyncio
     async def test_update_memory_returns_404_for_other_user(
         self, client, test_db, setup_users, get_auth_token
     ):

@@ -186,8 +186,20 @@ export const api = {
     order?: string;
   }) => request("GET", "/timeline", undefined, params),
   getMemory: (id: string) => request("GET", `/memories/${id}`),
-  updateMemory: (id: string, update: Record<string, unknown>) =>
-    request("PATCH", `/memories/${id}`, update),
+  updateMemory: (
+    id: string,
+    update: {
+      raw_input?: string;
+      title?: string;
+      summary?: string;
+      mood?: string;
+      tags?: string[];
+      people?: string[];
+      location?: string;
+      importance_level?: number;
+      event_date?: string;
+    }
+  ) => request("PATCH", `/memories/${id}`, update),
   deleteMemory: (id: string) => request("DELETE", `/memories/${id}`),
 
   generateStory: (data: {

@@ -700,9 +700,16 @@ async def update_memory(
     if update.event_date is not None:
         memory.event_date = update.event_date
 
-    content = memory.structured_content or {}
-    if not isinstance(content, dict):
-        content = {}
+    # Copy rather than mutate in place: structured_content is a JSON column and
+    # reassigning the identical dict object does not mark the attribute dirty,
+    # so the UPDATE would be skipped.
+    content = dict(memory.structured_content) if isinstance(memory.structured_content, dict) else {}
+
+    if update.title is not None:
+        content["title"] = update.title[:255] if update.title else None
+
+    if update.summary is not None:
+        content["summary"] = update.summary
 
     if update.people is not None:
         content["people"] = [str(p) for p in update.people if p]
@@ -710,15 +717,16 @@ async def update_memory(
     if update.location is not None:
         content["location"] = update.location[:100] if update.location else None
 
-    # Refresh denormalized fields from structured_content if present.
+    # Refresh denormalized fields from structured_content, but never let the
+    # stored (agent-derived) values clobber an explicit user edit above.
     if isinstance(content, dict):
-        if content.get("mood"):
+        if update.mood is None and content.get("mood"):
             memory.mood = content["mood"]
-        if content.get("importance_level") is not None:
+        if update.importance_level is None and content.get("importance_level") is not None:
             memory.importance_level = content["importance_level"]
-        if content.get("initial_tags"):
+        if update.tags is None and content.get("initial_tags"):
             memory.tags = [tag.lower()[:50] for tag in content["initial_tags"] if tag]
-        if content.get("event_date"):
+        if update.event_date is None and content.get("event_date"):
             parsed = content["event_date"]
             if isinstance(parsed, str):
                 try:

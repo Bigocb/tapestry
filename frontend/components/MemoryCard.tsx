@@ -5,10 +5,9 @@ import Link from "next/link";
 export interface Memory {
   id: string;
   raw_input: string;
-  refined_text?: string;
   title?: string;
   summary?: string;
-  state: string;
+  state?: string;
   processing_state?: string;
   created_at: string;
   event_date?: string;
@@ -16,7 +15,6 @@ export interface Memory {
   tags?: string[];
   people?: string[];
   location?: string;
-  importance_score?: number;
   importance_level?: number;
   needs_review?: boolean;
   review_reason?: string;
@@ -33,7 +31,7 @@ export function MemoryCard({
     <div className="border rounded p-4 bg-white shadow-sm hover:shadow transition">
       <div className="flex justify-between items-start">
         <Link href={`/memories/${memory.id}`} className="font-semibold text-lg">
-          {memory.title || memory.refined_text || memory.raw_input}
+          {memory.title || memory.raw_input}
         </Link>
         {onDelete && (
           <button
@@ -49,10 +47,10 @@ export function MemoryCard({
           ? new Date(memory.event_date).toLocaleDateString()
           : new Date(memory.created_at).toLocaleDateString()}
         {" "}
-        · {memory.state}
+        · {memory.processing_state}
       </p>
       <p className="text-gray-700 mt-2 line-clamp-3">
-        {memory.refined_text || memory.raw_input}
+        {memory.summary || memory.raw_input}
       </p>
       <div className="flex flex-wrap gap-2 mt-3">
         {memory.mood && (

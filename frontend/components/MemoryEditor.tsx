@@ -32,13 +32,13 @@ export function MemoryEditor({ id }: { id: string }) {
     setError("");
     try {
       await api.updateMemory(id, {
-        refined_text: memory.refined_text,
         title: memory.title,
+        summary: memory.summary,
         mood: memory.mood,
         tags: memory.tags,
         people: memory.people,
         location: memory.location,
-        importance_score: memory.importance_score,
+        importance_level: memory.importance_level,
         event_date: memory.event_date,
       });
       router.push("/search");
@@ -78,9 +78,9 @@ export function MemoryEditor({ id }: { id: string }) {
       />
       <textarea
         className="w-full border rounded p-3 h-40"
-        placeholder="Refined text"
-        value={memory.refined_text || memory.raw_input}
-        onChange={(e) => update("refined_text", e.target.value)}
+        placeholder="Summary"
+        value={memory.summary || memory.raw_input}
+        onChange={(e) => update("summary", e.target.value)}
       />
       <div className="grid grid-cols-2 gap-4">
         <input
@@ -141,15 +141,16 @@ export function MemoryEditor({ id }: { id: string }) {
         </label>
       </div>
       <label className="block">
-        Importance (1-5)
+        Importance (1-10)
         <input
           type="range"
           min={1}
-          max={5}
-          value={memory.importance_score || 3}
-          onChange={(e) => update("importance_score", Number(e.target.value))}
+          max={10}
+          value={memory.importance_level || 5}
+          onChange={(e) => update("importance_level", Number(e.target.value))}
           className="w-full"
         />
+        <span className="text-sm text-gray-500">{memory.importance_level || 5}</span>
       </label>
       <div className="flex gap-3">
         <button
