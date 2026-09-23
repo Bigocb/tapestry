@@ -15,10 +15,11 @@ from fastapi import (
 )
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from datetime import datetime
 from uuid import UUID
 import uuid
 
-from app.db import get_db, Memory, User, JobStatus, as_utc
+from app.db import get_db, Memory, User, as_utc
 from app.agents.capture import structure_memory
 from app.agents.embeddings import (
     cosine_similarity,

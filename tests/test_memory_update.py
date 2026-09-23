@@ -148,6 +148,51 @@ class TestMemoryUpdate:
         assert data["tags"] == ["work", "friends"]
 
     @pytest.mark.asyncio
+    async def test_update_memory_with_event_date_in_structured_content(
+        self, client, test_db, setup_users, get_auth_token
+    ):
+        """Editing a pipeline-processed memory must not crash.
+
+        The agents store structured_content with event_date as an ISO string.
+        PATCH parses that value back into a datetime; a missing import used to
+        raise NameError and return 500 for every such memory.
+        """
+        user1, _ = await setup_users()
+        token = get_auth_token("alice", "password123")
+
+        memory = Memory(
+            raw_input="Born in Conway",
+            input_type="text",
+            user_id=str(user1.id),
+            structured_content={
+                "title": "Birth",
+                "summary": "Born in Conway",
+                "entities": [],
+                "event_date": "1976-07-29T00:00:00Z",
+            },
+            tags=["birth"],
+            mood="neutral",
+            importance_level=8,
+            processing_state="enriched",
+            related_memory_ids=[],
+        )
+        test_db.add(memory)
+        await test_db.commit()
+        await test_db.refresh(memory)
+
+        response = client.patch(
+            f"/api/memories/{memory.id}",
+            json={"mood": "happy"},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["mood"] == "happy"
+        # The stored ISO event_date must survive the round trip.
+        assert data["event_date"] is not None
+
+    @pytest.mark.asyncio
     async def test_update_memory_returns_404_for_other_user(
         self, client, test_db, setup_users, get_auth_token
     ):

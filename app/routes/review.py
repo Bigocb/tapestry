@@ -13,7 +13,7 @@ from typing import Optional
 
 from app.db import get_db, Memory, User
 from app.dependencies import get_current_user
-from app.models.schemas import MemoryResponse, ReviewQueueResponse
+from app.models.schemas import ReviewQueueResponse
 from app.routes.memories import _memory_response
 
 router = APIRouter()
