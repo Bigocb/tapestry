@@ -190,4 +190,8 @@ export const api = {
   getInsightsTrends: () => request("GET", "/insights/trends"),
   getInsightsWordCloud: () => request("GET", "/insights/word-cloud"),
   getInsightsAchievements: () => request("GET", "/insights/achievements"),
+
+  getReviewQueue: (limit = 50, offset = 0) =>
+    request("GET", "/review", undefined, { limit, offset }),
+  getReviewCount: () => request("GET", "/review/count"),
 };

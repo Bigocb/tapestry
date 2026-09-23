@@ -7,7 +7,9 @@ export interface Memory {
   raw_input: string;
   refined_text?: string;
   title?: string;
+  summary?: string;
   state: string;
+  processing_state?: string;
   created_at: string;
   event_date?: string;
   mood?: string;
@@ -15,6 +17,9 @@ export interface Memory {
   people?: string[];
   location?: string;
   importance_score?: number;
+  importance_level?: number;
+  needs_review?: boolean;
+  review_reason?: string;
 }
 
 export function MemoryCard({

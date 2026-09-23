@@ -123,6 +123,20 @@ def _extract_people_and_location(structured_content: dict | None) -> tuple[list[
     return sorted(people), location
 
 
+def _apply_review_flags(memory: Memory) -> None:
+    """Flag a memory for the review queue when the pipeline couldn't complete.
+
+    Currently the only reason is a missing event date: without one the memory
+    cannot be placed on the timeline, so it is parked for the user to fix.
+    """
+    if memory.event_date is None:
+        memory.needs_review = True
+        memory.review_reason = "missing_date"
+    else:
+        memory.needs_review = False
+        memory.review_reason = None
+
+
 def _memory_response(memory: Memory) -> MemoryResponse:
     """Convert a Memory ORM object to a MemoryResponse Pydantic model."""
     content = memory.structured_content if isinstance(memory.structured_content, dict) else {}
@@ -144,6 +158,8 @@ def _memory_response(memory: Memory) -> MemoryResponse:
         event_date=memory.event_date,
         people=people,
         location=location,
+        needs_review=bool(memory.needs_review),
+        review_reason=memory.review_reason,
         created_at=memory.created_at,
         updated_at=memory.updated_at,
     )
@@ -217,6 +233,7 @@ async def _structure_and_update_memory(
     memory.structured_content = existing
 
     memory.processing_state = "capturing"
+    _apply_review_flags(memory)
     await db.commit()
     await db.refresh(memory)
 
@@ -700,9 +717,17 @@ async def update_memory(
         if content.get("initial_tags"):
             memory.tags = [tag.lower()[:50] for tag in content["initial_tags"] if tag]
         if content.get("event_date"):
-            memory.event_date = content["event_date"]
+            parsed = content["event_date"]
+            if isinstance(parsed, str):
+                try:
+                    parsed = datetime.fromisoformat(parsed.replace("Z", "+00:00"))
+                except ValueError:
+                    parsed = None
+            if parsed is not None:
+                memory.event_date = parsed
 
     memory.structured_content = content
+    _apply_review_flags(memory)
     await db.commit()
     await db.refresh(memory)
     return _memory_response(memory)

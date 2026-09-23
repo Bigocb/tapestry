@@ -8,6 +8,7 @@ from sqlalchemy import (
     UUID,
     Float,
     Integer,
+    Boolean,
     ForeignKey,
     Index,
     JSON,
@@ -128,6 +129,12 @@ class Memory(Base):
 
     # When the remembered event occurred (extracted from raw_input by agents)
     event_date = Column(TIMESTAMP, nullable=True)
+
+    # Review queue: set when the pipeline could not confidently complete
+    # (currently: no event date could be found). review_reason is a short
+    # machine-readable code, e.g. 'missing_date'.
+    needs_review = Column(Boolean, default=False, nullable=False)
+    review_reason = Column(String(50), nullable=True)
 
     # Timestamps
     created_at = Column(TIMESTAMP, server_default=func.now(), nullable=False)

@@ -1,17 +1,41 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { useAuth } from "@/lib/auth";
+import { api } from "@/lib/api";
 import {
   MicrophoneIcon,
   MagnifyingGlassIcon,
   ClockIcon,
   BookOpenIcon,
   ChartBarIcon,
+  InboxIcon,
 } from "@heroicons/react/24/outline";
 
 export function Layout({ children }: { children: React.ReactNode }) {
   const { token, logout } = useAuth();
+  const pathname = usePathname();
+  const [reviewCount, setReviewCount] = useState(0);
+
+  useEffect(() => {
+    if (!token) {
+      return;
+    }
+    let active = true;
+    api
+      .getReviewCount()
+      .then((data) => {
+        if (active) setReviewCount(data?.count ?? 0);
+      })
+      .catch(() => {
+        if (active) setReviewCount(0);
+      });
+    return () => {
+      active = false;
+    };
+  }, [token, pathname]);
 
   return (
     <div className="min-h-screen flex flex-col">
@@ -37,6 +61,13 @@ export function Layout({ children }: { children: React.ReactNode }) {
               <NavLink href="/insights" icon={<ChartBarIcon className="w-4 h-4" />}>
                 Insights
               </NavLink>
+              <NavLink
+                href="/review"
+                icon={<InboxIcon className="w-4 h-4" />}
+                badge={reviewCount}
+              >
+                Review
+              </NavLink>
               <button
                 onClick={logout}
                 className="ml-4 px-3 py-1 bg-white/10 rounded hover:bg-white/20"
@@ -56,15 +87,22 @@ function NavLink({
   href,
   icon,
   children,
+  badge,
 }: {
   href: string;
   icon: React.ReactNode;
   children: React.ReactNode;
+  badge?: number;
 }) {
   return (
     <Link href={href} className="flex items-center gap-1 hover:text-indigo-100">
       {icon}
       <span>{children}</span>
+      {badge !== undefined && badge > 0 && (
+        <span className="ml-1 bg-amber-400 text-amber-950 text-xs font-semibold rounded-full px-1.5 min-w-[1.25rem] text-center">
+          {badge}
+        </span>
+      )}
     </Link>
   );
 }

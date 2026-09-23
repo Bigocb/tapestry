@@ -32,7 +32,12 @@ def _matches_timeline_filters(
     mood: Optional[str],
 ) -> bool:
     """Return True if a memory passes the timeline filters."""
-    memory_date = _timeline_date(memory)
+    # Memories without an event date cannot be placed chronologically; they
+    # live in the review queue until the user supplies one.
+    if memory.event_date is None:
+        return False
+
+    memory_date = memory.event_date
 
     if start_date and memory_date < start_date:
         return False

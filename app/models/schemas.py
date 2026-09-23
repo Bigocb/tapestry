@@ -147,6 +147,8 @@ class MemoryResponse(BaseModel):
     event_date: Optional[datetime] = None
     people: List[str] = Field(default_factory=list)
     location: Optional[str] = None
+    needs_review: bool = False
+    review_reason: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 
@@ -374,6 +376,20 @@ class InsightsResponse(BaseModel):
     word_cloud: List[WordCloudData]
     achievements: List[Achievement]
     streak_days: int = Field(default=0, description="Consecutive days with captures")
+
+
+# ============================================================================
+# REVIEW QUEUE MODELS
+# ============================================================================
+
+
+class ReviewQueueResponse(BaseModel):
+    """A page of memories awaiting user review."""
+
+    items: List[MemoryResponse]
+    total: int = Field(..., description="Total memories needing review")
+    limit: int
+    offset: int
 
 
 # ============================================================================

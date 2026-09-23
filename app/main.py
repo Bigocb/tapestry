@@ -11,10 +11,10 @@ from contextlib import asynccontextmanager
 from sqlalchemy import inspect, text
 
 # Import routes
-from app.routes import auth, memories, stories, wiki, timeline, insights
+from app.routes import auth, memories, stories, wiki, timeline, insights, review
 from app.jobs.scheduler import scheduler
 from app.db import Base, engine
-from app.agents.capture import _ollama_config
+from app.agents.capture import _ollama_config, _extract_event_date
 
 import httpx
 
@@ -31,6 +31,52 @@ async def _apply_pending_migrations() -> None:
         if not await conn.run_sync(_has_column, "memories", "event_date"):
             await conn.execute(text("ALTER TABLE memories ADD COLUMN event_date TIMESTAMP"))
             print("Added missing event_date column to memories table.")
+        if not await conn.run_sync(_has_column, "memories", "needs_review"):
+            await conn.execute(
+                text("ALTER TABLE memories ADD COLUMN needs_review BOOLEAN DEFAULT FALSE")
+            )
+            print("Added missing needs_review column to memories table.")
+        if not await conn.run_sync(_has_column, "memories", "review_reason"):
+            await conn.execute(
+                text("ALTER TABLE memories ADD COLUMN review_reason VARCHAR(50)")
+            )
+            print("Added missing review_reason column to memories table.")
+
+        # Backfill: memories captured before the review queue existed that have
+        # no event date would otherwise be invisible -- excluded from the
+        # timeline but never flagged. Park them in the queue instead, trying to
+        # recover a date from the raw text first.
+        result = await conn.execute(
+            text(
+                "SELECT id, raw_input FROM memories "
+                "WHERE event_date IS NULL AND needs_review = :flagged"
+            ),
+            {"flagged": False},
+        )
+        rows = result.fetchall()
+        recovered = 0
+        flagged = 0
+        for memory_id, raw_input in rows:
+            parsed = _extract_event_date(raw_input or "")
+            if parsed is not None:
+                await conn.execute(
+                    text("UPDATE memories SET event_date = :d WHERE id = :i"),
+                    {"d": parsed, "i": memory_id},
+                )
+                recovered += 1
+            else:
+                await conn.execute(
+                    text(
+                        "UPDATE memories SET needs_review = :r, review_reason = :reason "
+                        "WHERE id = :i"
+                    ),
+                    {"r": True, "reason": "missing_date", "i": memory_id},
+                )
+                flagged += 1
+        if recovered or flagged:
+            print(
+                f"Backfilled undated memories: {recovered} dated, {flagged} queued for review."
+            )
 
 tags_metadata = [
     {
@@ -146,6 +192,7 @@ app.include_router(memories.router, prefix="/api", tags=["memories"])
 app.include_router(stories.router, prefix="/api", tags=["stories"])
 app.include_router(timeline.router, prefix="/api", tags=["timeline"])
 app.include_router(insights.router, prefix="/api", tags=["insights"])
+app.include_router(review.router, prefix="/api", tags=["review"])
 app.include_router(wiki.router, prefix="/api", tags=["wiki"])
 
 

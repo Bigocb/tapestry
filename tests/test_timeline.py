@@ -91,6 +91,7 @@ async def _seed_memory(
     tags=None,
     mood="neutral",
 ):
+    created = created_at or datetime.utcnow()
     memory = Memory(
         raw_input=raw_input,
         input_type="text",
@@ -101,7 +102,10 @@ async def _seed_memory(
         importance_level=5,
         processing_state="enriched",
         related_memory_ids=[],
-        created_at=created_at or datetime.utcnow(),
+        created_at=created,
+        # Timeline only shows memories with an event date; default it to
+        # created_at so these ordering/filter tests exercise the intended path.
+        event_date=created,
     )
     session.add(memory)
     await session.commit()

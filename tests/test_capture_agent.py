@@ -5,6 +5,7 @@ import pytest
 from app.agents.capture import (
     CAPTURE_SYSTEM_PROMPT,
     _build_structured_memory,
+    _extract_event_date,
     _fallback_structured_memory,
     _normalize_entities,
     structure_memory,
@@ -90,6 +91,54 @@ class TestCaptureAgentHelpers:
         raw_input = "test"
         result = _build_structured_memory(raw_dict, raw_input)
         assert result.importance_level == 5
+
+
+class TestEventDateExtraction:
+    """Deterministic fallback date extraction (used when the LLM omits a date)."""
+
+    def test_explicit_iso_date(self):
+        assert _extract_event_date("Meeting on 2024-03-15 was productive.") is not None
+        assert _extract_event_date("Meeting on 2024-03-15 was productive.").year == 2024
+
+    def test_month_day_year(self):
+        result = _extract_event_date(
+            "On July 29, 1976 I was born in Conway, South Carolina."
+        )
+        assert (result.year, result.month, result.day) == (1976, 7, 29)
+
+    def test_month_year(self):
+        result = _extract_event_date("I visited Paris in July 2024")
+        assert (result.year, result.month) == (2024, 7)
+
+    def test_bare_year(self):
+        result = _extract_event_date("Back in 2019 I started learning guitar.")
+        assert result is not None
+        assert result.year == 2019
+
+    def test_holiday_with_year(self):
+        result = _extract_event_date("Christmas 2021 was the best one yet.")
+        assert result is not None
+        assert (result.year, result.month, result.day) == (2021, 12, 25)
+
+    def test_weekday_is_relative_to_today(self):
+        result = _extract_event_date("We had dinner at the new Thai place on Friday.")
+        assert result is not None
+
+    def test_last_weekday(self):
+        result = _extract_event_date("Last Tuesday I finally finished the garage project.")
+        assert result is not None
+
+    def test_season_phrase(self):
+        result = _extract_event_date("Two summers ago we drove up the coast.")
+        assert result is not None
+
+    def test_relative_phrases(self):
+        assert _extract_event_date("yesterday I went for a run") is not None
+        assert _extract_event_date("last week we moved offices") is not None
+
+    def test_no_date_returns_none(self):
+        assert _extract_event_date("Saw an amazing sunset from the pier.") is None
+        assert _extract_event_date("Just a quick thought about the project.") is None
 
 
 class TestCaptureAgentStructureMemory:

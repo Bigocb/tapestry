@@ -175,6 +175,13 @@ async def _run_enrichment(memory: Memory, db: AsyncSession) -> None:
     memory.tags = enriched.initial_tags
     memory.event_date = enriched.event_date
     memory.related_memory_ids = related_ids
+    # Enrichment is the final stage: flag for review if no date was found.
+    if memory.event_date is None:
+        memory.needs_review = True
+        memory.review_reason = "missing_date"
+    else:
+        memory.needs_review = False
+        memory.review_reason = None
 
 
 async def run_tracked_job(job_id: str) -> None:

@@ -280,6 +280,8 @@ def _extract_event_date(raw_input: str) -> Optional[datetime]:
     # Relative phrases
     if "yesterday" in text:
         return today - timedelta(days=1)
+    if "today" in text:
+        return today
     if "last week" in text or "a week ago" in text:
         return today - timedelta(days=7)
     if "last month" in text or "a month ago" in text:
@@ -299,6 +301,48 @@ def _extract_event_date(raw_input: str) -> Optional[datetime]:
     match = re.search(r"(\d+)\s+years?\s+ago", text)
     if match:
         return today - timedelta(days=int(match.group(1)) * 365)
+
+    # Seasons: "last summer", "this winter", "in the spring", "two summers ago".
+    season_months = {"spring": 3, "summer": 6, "fall": 9, "autumn": 9, "winter": 12}
+    season_word = next(
+        (s for s in season_months if re.search(rf"\b{s}s?\b", text)), None
+    )
+    if season_word:
+        year = today.year
+        if re.search(r"\b(one|a|last)\s+year\b", text):
+            year = today.year - 1
+        elif "two" in text and season_word in text:
+            year = today.year - 2
+        elif re.search(r"\bthis\b", text):
+            year = today.year
+        return datetime(year, season_months[season_word], 1).replace(tzinfo=timezone.utc)
+
+    # Weekdays: "on Friday", "last Tuesday", "this Monday" (most recent past).
+    weekday_names = {
+        "monday": 0, "tuesday": 1, "wednesday": 2, "thursday": 3,
+        "friday": 4, "saturday": 5, "sunday": 6,
+    }
+    weekday_word = next(
+        (name for name in weekday_names if re.search(rf"\b{name}\b", text)), None
+    )
+    if weekday_word and re.search(r"\b(last|this|on|past)\b", text):
+        target = weekday_names[weekday_word]
+        days_since = (today.weekday() - target) % 7
+        if days_since == 0 and "last" in text:
+            days_since = 7
+        return today - timedelta(days=days_since)
+
+    # Holidays with an optional year: "Christmas 2021", "Christmas".
+    holiday_months = {
+        "christmas": (12, 25), "new year": (1, 1), "new year's": (1, 1),
+        "halloween": (10, 31), "valentine": (2, 14),
+        "thanksgiving": (11, 28), "independence day": (7, 4),
+    }
+    for name, (month, day) in holiday_months.items():
+        holiday_match = re.search(rf"{name}(?:'s)?(?:\s+(\d{{4}}))?", text)
+        if holiday_match:
+            year = int(holiday_match.group(1)) if holiday_match.group(1) else today.year
+            return datetime(year, month, day).replace(tzinfo=timezone.utc)
 
     # Full month-day-year, e.g. "July 29, 1976" or "July 29th, 1976"
     month_day_year_match = re.search(
@@ -332,6 +376,14 @@ def _extract_event_date(raw_input: str) -> Optional[datetime]:
         try:
             dt = datetime.strptime(f"{month_year_match.group(1)} {month_year_match.group(2)}", "%B %Y")
             return dt.replace(tzinfo=timezone.utc)
+        except ValueError:
+            pass
+
+    # Bare four-digit year, e.g. "Back in 2019 I started...".
+    year_match = re.search(r"\b(19|20)\d{2}\b", raw_input)
+    if year_match:
+        try:
+            return datetime(int(year_match.group(0)), 1, 1).replace(tzinfo=timezone.utc)
         except ValueError:
             pass
 
