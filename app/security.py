@@ -12,6 +12,35 @@ SECRET_KEY = os.getenv("JWT_SECRET_KEY", "dev-secret-key-change-in-production")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 30
 
+# Inactivity timeout. The client enforces this by tracking user activity and
+# signing out after a quiet period; the value is served to the client so a
+# single .env setting drives the whole app.
+DEFAULT_SESSION_IDLE_MINUTES = 15
+DEFAULT_SESSION_IDLE_WARNING_SECONDS = 60
+
+
+def get_session_idle_minutes() -> int:
+    """Idle timeout in minutes, from SESSION_IDLE_MINUTES."""
+    try:
+        value = int(os.getenv("SESSION_IDLE_MINUTES", DEFAULT_SESSION_IDLE_MINUTES))
+    except (TypeError, ValueError):
+        return DEFAULT_SESSION_IDLE_MINUTES
+    return max(1, value)
+
+
+def get_session_idle_warning_seconds() -> int:
+    """How long before logout to warn the user, from SESSION_IDLE_WARNING_SECONDS."""
+    try:
+        value = int(
+            os.getenv(
+                "SESSION_IDLE_WARNING_SECONDS", DEFAULT_SESSION_IDLE_WARNING_SECONDS
+            )
+        )
+    except (TypeError, ValueError):
+        return DEFAULT_SESSION_IDLE_WARNING_SECONDS
+    # Never warn for longer than the timeout itself.
+    return max(0, min(value, get_session_idle_minutes() * 60))
+
 # Password hashing context
 pwd_context = CryptContext(
     schemes=["bcrypt"],

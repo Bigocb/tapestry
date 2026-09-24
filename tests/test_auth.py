@@ -339,6 +339,36 @@ class TestTokenRefresh:
         assert "access_token" in response.json()
 
 
+class TestSessionConfig:
+    """Inactivity policy is served to the client."""
+
+    def test_session_config_requires_no_auth(self, client):
+        """The login page needs the timeout before a token exists."""
+        response = client.get("/api/auth/session-config")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["idle_timeout_seconds"] > 0
+        assert data["warning_seconds"] >= 0
+        # Warning must not exceed the timeout itself.
+        assert data["warning_seconds"] <= data["idle_timeout_seconds"]
+
+    def test_session_config_defaults_to_15_minutes(self, client, monkeypatch):
+        monkeypatch.delenv("SESSION_IDLE_MINUTES", raising=False)
+        response = client.get("/api/auth/session-config")
+        assert response.json()["idle_timeout_seconds"] == 15 * 60
+
+    def test_session_config_honours_env_override(self, client, monkeypatch):
+        monkeypatch.setenv("SESSION_IDLE_MINUTES", "45")
+        response = client.get("/api/auth/session-config")
+        assert response.json()["idle_timeout_seconds"] == 45 * 60
+
+    def test_session_config_clamps_invalid_env(self, client, monkeypatch):
+        monkeypatch.setenv("SESSION_IDLE_MINUTES", "not-a-number")
+        response = client.get("/api/auth/session-config")
+        # Falls back to the default rather than crashing.
+        assert response.json()["idle_timeout_seconds"] == 15 * 60
+
+
 class TestUserIsolation:
     """Test that users are properly isolated."""
 

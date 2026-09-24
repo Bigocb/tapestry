@@ -13,9 +13,25 @@ from app.security import (
     verify_password,
     create_access_token,
     decode_access_token,
+    get_session_idle_minutes,
+    get_session_idle_warning_seconds,
 )
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+
+
+@router.get("/session-config")
+async def session_config() -> dict:
+    """Expose the session inactivity policy to the client.
+
+    Unauthenticated on purpose: the login page needs the timeout value before
+    a token exists. It contains no secrets.
+    """
+    idle_minutes = get_session_idle_minutes()
+    return {
+        "idle_timeout_seconds": idle_minutes * 60,
+        "warning_seconds": get_session_idle_warning_seconds(),
+    }
 
 
 @router.post("/register", response_model=UserResponse)
