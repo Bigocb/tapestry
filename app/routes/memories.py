@@ -41,6 +41,7 @@ from app.models.schemas import (
     SearchResult,
 )
 from app.dependencies import get_current_user
+from app.privacy import LOCKED_SUMMARY, LOCKED_TITLE, get_unlocked_memory_ids, is_locked
 
 router = APIRouter()
 
@@ -144,8 +145,43 @@ def _apply_review_flags(memory: Memory) -> None:
         memory.review_reason = None
 
 
-def _memory_response(memory: Memory) -> MemoryResponse:
-    """Convert a Memory ORM object to a MemoryResponse Pydantic model."""
+def _memory_response(
+    memory: Memory, unlocked_ids: set[str] | None = None
+) -> MemoryResponse:
+    """Convert a Memory ORM object to a MemoryResponse Pydantic model.
+
+    When the memory is private and has not been unlocked for this session, all
+    content-bearing fields are withheld. Metadata needed to render the lock
+    (id, dates, importance, lock state) is still returned so the UI can show a
+    placeholder and an unlock control.
+    """
+    locked = is_locked(memory, unlocked_ids or set())
+
+    if locked:
+        return MemoryResponse(
+            id=memory.id,
+            user_id=memory.user_id,
+            raw_input="",
+            input_type=memory.input_type,
+            structured_content=None,
+            title=LOCKED_TITLE,
+            summary=LOCKED_SUMMARY,
+            tags=[],
+            mood=None,
+            importance_level=memory.importance_level,
+            processing_state=memory.processing_state,
+            related_memory_ids=[],
+            event_date=memory.event_date,
+            people=[],
+            location=None,
+            needs_review=bool(memory.needs_review),
+            review_reason=memory.review_reason,
+            is_private=True,
+            is_locked=True,
+            created_at=memory.created_at,
+            updated_at=memory.updated_at,
+        )
+
     content = memory.structured_content if isinstance(memory.structured_content, dict) else {}
     people, location = _extract_people_and_location(content)
 
@@ -167,6 +203,8 @@ def _memory_response(memory: Memory) -> MemoryResponse:
         location=location,
         needs_review=bool(memory.needs_review),
         review_reason=memory.review_reason,
+        is_private=bool(memory.is_private),
+        is_locked=False,
         created_at=memory.created_at,
         updated_at=memory.updated_at,
     )
@@ -459,10 +497,16 @@ async def _search_memories(
     db: AsyncSession,
     user_id: str,
     query: SearchQuery,
+    unlocked_ids: set[str] | None = None,
 ) -> SearchResponse:
-    """Perform hybrid search: full-text + semantic + structured filters."""
+    """Perform hybrid search: full-text + semantic + structured filters.
+
+    Locked (private, not-unlocked) memories are excluded entirely: scoring them
+    would leak whether their content matches the query.
+    """
     from sqlalchemy import desc
 
+    unlocked_ids = unlocked_ids or set()
     text_query = (query.text or "").strip()
     semantic_query = (query.semantic or "").strip()
     filters = query.filters
@@ -483,6 +527,8 @@ async def _search_memories(
 
     scored: list[tuple[float, Memory]] = []
     for memory in memories:
+        if is_locked(memory, unlocked_ids):
+            continue
         # Filter pre-check: skip memories that fail structured filters unless
         # they have some text/semantic signal, so pure filter mismatches drop out.
         passes_filter = _matches_filters(memory, filters)
@@ -540,6 +586,7 @@ async def search_memories_semantic(
     limit: int = 10,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    unlocked_ids: set[str] = Depends(get_unlocked_memory_ids),
 ) -> SearchResponse:
     """Return the top-k memories most semantically similar to the query.
 
@@ -552,7 +599,7 @@ async def search_memories_semantic(
         limit = 100
 
     search_query = SearchQuery(semantic=query, limit=limit, offset=0)
-    return await _search_memories(db, str(current_user.id), search_query)
+    return await _search_memories(db, str(current_user.id), search_query, unlocked_ids)
 
 
 @router.post(
@@ -565,9 +612,10 @@ async def search_memories(
     query: SearchQuery,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    unlocked_ids: set[str] = Depends(get_unlocked_memory_ids),
 ) -> SearchResponse:
     """Perform hybrid search across text, semantic, and filters."""
-    return await _search_memories(db, str(current_user.id), query)
+    return await _search_memories(db, str(current_user.id), query, unlocked_ids)
 
 
 @router.post(
@@ -582,13 +630,14 @@ async def search_memories_natural(
     offset: int = 0,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    unlocked_ids: set[str] = Depends(get_unlocked_memory_ids),
 ) -> SearchResponse:
     """Parse natural language into SearchQuery, then perform hybrid search."""
     search_query = await parse_search_query(query)
     # Override pagination params from URL if provided.
     search_query.limit = max(1, min(100, limit))
     search_query.offset = max(0, offset)
-    return await _search_memories(db, str(current_user.id), search_query)
+    return await _search_memories(db, str(current_user.id), search_query, unlocked_ids)
 
 
 @router.get(
@@ -601,6 +650,7 @@ async def get_memory(
     memory_id: UUID,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    unlocked_ids: set[str] = Depends(get_unlocked_memory_ids),
 ) -> MemoryResponse:
     """Retrieve a single memory by ID, scoped to the current user."""
     stmt = select(Memory).where(Memory.id == str(memory_id)).where(Memory.user_id == current_user.id)
@@ -613,7 +663,7 @@ async def get_memory(
             detail="Memory not found",
         )
 
-    return _memory_response(memory)
+    return _memory_response(memory, unlocked_ids)
 
 
 @router.get(
@@ -628,6 +678,7 @@ async def list_memories(
     sort: str = "created_at_desc",
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    unlocked_ids: set[str] = Depends(get_unlocked_memory_ids),
 ) -> list[MemoryResponse]:
     """List memories for the current user with pagination.
 
@@ -659,7 +710,7 @@ async def list_memories(
     result = await db.execute(stmt)
     memories = result.scalars().all()
 
-    return [_memory_response(memory) for memory in memories]
+    return [_memory_response(memory, unlocked_ids) for memory in memories]
 
 
 @router.patch(
@@ -674,6 +725,7 @@ async def update_memory(
     background_tasks: BackgroundTasks,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    unlocked_ids: set[str] = Depends(get_unlocked_memory_ids),
 ) -> MemoryResponse:
     """Apply partial updates to a memory owned by the current user.
 
@@ -691,6 +743,9 @@ async def update_memory(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Memory not found",
         )
+
+    if update.is_private is not None:
+        memory.is_private = update.is_private
 
     # Detect a genuine text change before overwriting it.
     raw_input_changed = (
@@ -789,7 +844,7 @@ async def update_memory(
             overrides,
         )
 
-    return _memory_response(memory)
+    return _memory_response(memory, unlocked_ids)
 
 
 @router.delete(

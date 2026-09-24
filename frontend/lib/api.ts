@@ -27,6 +27,47 @@ function redirectToLogin() {
   window.location.href = "/login";
 }
 
+// ---------------------------------------------------------------------------
+// Privacy unlocks.
+//
+// Unlocked memory ids live in sessionStorage, so they are specific to this tab
+// and disappear when it closes. Crucially they are NOT persisted, so a page
+// refresh re-locks everything.
+// ---------------------------------------------------------------------------
+const UNLOCKED_KEY = "unlockedMemoryIds";
+
+export function getUnlockedIds(): string[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = sessionStorage.getItem(UNLOCKED_KEY);
+    return raw ? (JSON.parse(raw) as string[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+export function setUnlockedIds(ids: string[]): void {
+  if (typeof window === "undefined") return;
+  try {
+    sessionStorage.setItem(UNLOCKED_KEY, JSON.stringify(ids));
+  } catch {
+    // ignore storage errors
+  }
+}
+
+export function unlockMemory(id: string): void {
+  const ids = getUnlockedIds();
+  if (!ids.includes(id)) setUnlockedIds([...ids, id]);
+}
+
+export function relockMemory(id: string): void {
+  setUnlockedIds(getUnlockedIds().filter((existing) => existing !== id));
+}
+
+export function relockAll(): void {
+  setUnlockedIds([]);
+}
+
 let refreshPromise: Promise<string | null> | null = null;
 
 async function refreshAccessToken(): Promise<string | null> {
@@ -75,6 +116,12 @@ async function request(
   const token = getToken();
   if (token) headers["Authorization"] = `Bearer ${token}`;
   if (body) headers["Content-Type"] = "application/json";
+
+  // Tell the backend which private memories this session has unlocked.
+  const unlocked = getUnlockedIds();
+  if (unlocked.length > 0) {
+    headers["X-Unlocked-Memory-Ids"] = unlocked.join(",");
+  }
 
   let response: Response;
   try {
@@ -198,6 +245,7 @@ export const api = {
       location?: string;
       importance_level?: number;
       event_date?: string;
+      is_private?: boolean;
     }
   ) => request("PATCH", `/memories/${id}`, update),  deleteMemory: (id: string) => request("DELETE", `/memories/${id}`),
 

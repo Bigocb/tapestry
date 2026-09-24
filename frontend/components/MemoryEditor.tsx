@@ -3,28 +3,45 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api";
+import { usePrivacy } from "@/lib/privacy";
 import { Memory } from "./MemoryCard";
 
 export function MemoryEditor({ id }: { id: string }) {
   const router = useRouter();
+  const { isUnlocked, unlock, relock } = usePrivacy();
   const [memory, setMemory] = useState<Memory | null>(null);
   const [original, setOriginal] = useState<Memory | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
+  const [togglingLock, setTogglingLock] = useState(false);
 
-  useEffect(() => {
+  // Fetch and apply, setting state only from async callbacks. Calling setState
+  // synchronously inside an effect triggers cascading renders (and is flagged
+  // by react-hooks/set-state-in-effect), so the effect below never does it.
+  const fetchMemory = () =>
     api
       .getMemory(id)
       .then((data) => {
         setMemory(data);
         setOriginal(data);
-        setLoading(false);
+        setError("");
       })
       .catch((err: unknown) => {
         setError(err instanceof Error ? err.message : "Failed to load memory");
+      })
+      .finally(() => {
         setLoading(false);
       });
+
+  const reload = () => {
+    setLoading(true);
+    fetchMemory();
+  };
+
+  useEffect(() => {
+    fetchMemory();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
   const save = async (e: React.FormEvent) => {
@@ -74,6 +91,28 @@ export function MemoryEditor({ id }: { id: string }) {
     }
   };
 
+  const togglePrivacy = async () => {
+    if (!memory) return;
+    setTogglingLock(true);
+    setError("");
+    try {
+      const next = !memory.is_private;
+      await api.updateMemory(id, { is_private: next });
+      if (next) {
+        // A freshly locked memory is hidden from the session immediately.
+        relock(id);
+      } else {
+        // Making it public means it no longer needs an unlock token.
+        relock(id);
+      }
+      reload();
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Failed to change privacy");
+    } finally {
+      setTogglingLock(false);
+    }
+  };
+
   if (loading) return <p>Loading...</p>;
   if (error) return <p className="text-red-600">{error}</p>;
   if (!memory) return <p>Memory not found.</p>;
@@ -83,6 +122,29 @@ export function MemoryEditor({ id }: { id: string }) {
 
   const sourceChanged =
     original !== null && memory.raw_input !== original.raw_input;
+
+  // The server withholds content when the memory is private and this session
+  // has not unlocked it. Show an unlock gate instead of an empty editor.
+  if (memory.is_locked) {
+    return (
+      <div className="max-w-2xl mx-auto text-center py-16">
+        <div className="text-5xl mb-4">🔒</div>
+        <h1 className="text-2xl font-bold mb-2">This memory is private</h1>
+        <p className="text-gray-600 mb-6">
+          Its contents are hidden until you unlock it for this session.
+        </p>
+        <button
+          onClick={() => {
+            unlock(id);
+            reload();
+          }}
+          className="bg-indigo-600 text-white px-5 py-2 rounded hover:bg-indigo-700"
+        >
+          Unlock memory
+        </button>
+      </div>
+    );
+  }
 
   return (
     <form onSubmit={save} className="max-w-2xl mx-auto space-y-6">
@@ -224,6 +286,49 @@ export function MemoryEditor({ id }: { id: string }) {
             className="w-full"
           />
         </Field>
+      </section>
+
+      <section className="border rounded p-4 space-y-2">
+        <div className="flex items-center justify-between gap-4">
+          <div>
+            <span className="block font-medium text-sm text-gray-800">
+              Privacy
+            </span>
+            <span className="block text-xs text-gray-500">
+              {memory.is_private
+                ? "Private. Hidden behind a lock until you unlock it for the session."
+                : "Public within your account. Visible in lists, search and the timeline."}
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={togglePrivacy}
+            disabled={togglingLock}
+            className={`px-4 py-2 rounded disabled:opacity-50 shrink-0 ${
+              memory.is_private
+                ? "bg-gray-200 text-gray-800 hover:bg-gray-300"
+                : "bg-gray-800 text-white hover:bg-gray-900"
+            }`}
+          >
+            {togglingLock
+              ? "Working..."
+              : memory.is_private
+                ? "Remove privacy lock"
+                : "Make private"}
+          </button>
+        </div>
+        {memory.is_private && isUnlocked(id) && (
+          <button
+            type="button"
+            onClick={() => {
+              relock(id);
+              reload();
+            }}
+            className="text-sm text-indigo-600 hover:underline"
+          >
+            Re-lock now (hide again)
+          </button>
+        )}
       </section>
 
       <div className="flex gap-3">

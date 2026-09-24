@@ -136,6 +136,10 @@ class Memory(Base):
     needs_review = Column(Boolean, default=False, nullable=False)
     review_reason = Column(String(50), nullable=True)
 
+    # Privacy screen: a private memory's content is withheld from every API
+    # response until the client explicitly unlocks it for the session.
+    is_private = Column(Boolean, default=False, nullable=False)
+
     # Timestamps
     created_at = Column(TIMESTAMP, server_default=func.now(), nullable=False)
     updated_at = Column(

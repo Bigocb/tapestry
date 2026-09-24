@@ -14,6 +14,7 @@ from typing import Optional
 from app.db import get_db, Memory, User, as_utc
 from app.dependencies import get_current_user
 from app.models.schemas import MemoryResponse
+from app.privacy import get_unlocked_memory_ids
 from app.routes.memories import _memory_response
 
 router = APIRouter()
@@ -75,6 +76,7 @@ async def get_timeline(
     order: str = Query("desc", description="'desc' (newest first) or 'asc'"),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    unlocked_ids: set[str] = Depends(get_unlocked_memory_ids),
 ) -> list[MemoryResponse]:
     """Return the user's memories in chronological order."""
     stmt = select(Memory).where(Memory.user_id == current_user.id)
@@ -94,4 +96,4 @@ async def get_timeline(
     )
 
     page = filtered[offset : offset + limit]
-    return [_memory_response(memory) for memory in page]
+    return [_memory_response(memory, unlocked_ids) for memory in page]

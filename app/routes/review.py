@@ -14,6 +14,7 @@ from typing import Optional
 from app.db import get_db, Memory, User
 from app.dependencies import get_current_user
 from app.models.schemas import ReviewQueueResponse
+from app.privacy import get_unlocked_memory_ids
 from app.routes.memories import _memory_response
 
 router = APIRouter()
@@ -34,6 +35,7 @@ async def get_review_queue(
     offset: int = Query(0, ge=0),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    unlocked_ids: set[str] = Depends(get_unlocked_memory_ids),
 ) -> ReviewQueueResponse:
     """Return the current user's review queue."""
     filters = [
@@ -57,7 +59,7 @@ async def get_review_queue(
     memories = result.scalars().all()
 
     return ReviewQueueResponse(
-        items=[_memory_response(memory) for memory in memories],
+        items=[_memory_response(memory, unlocked_ids) for memory in memories],
         total=total,
         limit=limit,
         offset=offset,

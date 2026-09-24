@@ -149,6 +149,11 @@ class MemoryResponse(BaseModel):
     location: Optional[str] = None
     needs_review: bool = False
     review_reason: Optional[str] = None
+    is_private: bool = False
+    is_locked: bool = Field(
+        False,
+        description="True when the memory is private and not unlocked for this session",
+    )
     created_at: datetime
     updated_at: datetime
 
@@ -202,6 +207,7 @@ class MemoryUpdate(BaseModel):
     event_date: Optional[datetime] = None
     people: Optional[List[str]] = None
     location: Optional[str] = None
+    is_private: Optional[bool] = None
 
 
 # ============================================================================

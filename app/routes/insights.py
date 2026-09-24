@@ -20,6 +20,7 @@ from app.models.schemas import (
     TrendData,
     WordCloudData,
 )
+from app.privacy import get_unlocked_memory_ids, is_locked
 
 router = APIRouter()
 
@@ -75,10 +76,17 @@ def _memory_date(memory: Memory) -> datetime:
     return memory.event_date or memory.created_at
 
 
-async def _load_user_memories(db: AsyncSession, user_id) -> list[Memory]:
-    """Fetch all memories owned by the user."""
+async def _load_user_memories(
+    db: AsyncSession, user_id, unlocked_ids: set[str] | None = None
+) -> list[Memory]:
+    """Fetch the user's memories, excluding any still locked.
+
+    Locked memories are omitted so aggregate output (moods, tags, word cloud)
+    cannot leak their contents.
+    """
     result = await db.execute(select(Memory).where(Memory.user_id == user_id))
-    return list(result.scalars().all())
+    unlocked_ids = unlocked_ids or set()
+    return [m for m in result.scalars().all() if not is_locked(m, unlocked_ids)]
 
 
 @router.get(
@@ -90,9 +98,10 @@ async def _load_user_memories(db: AsyncSession, user_id) -> list[Memory]:
 async def get_insights_stats(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    unlocked_ids: set[str] = Depends(get_unlocked_memory_ids),
 ) -> MemoryStats:
     """Return aggregate statistics for the current user's memories."""
-    memories = await _load_user_memories(db, current_user.id)
+    memories = await _load_user_memories(db, current_user.id, unlocked_ids)
 
     total = len(memories)
     mood_counts: Counter = Counter()
@@ -124,9 +133,10 @@ async def get_insights_stats(
 async def get_insights_trends(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    unlocked_ids: set[str] = Depends(get_unlocked_memory_ids),
 ) -> MemoryTrends:
     """Return weekly memory counts and mood trends."""
-    memories = await _load_user_memories(db, current_user.id)
+    memories = await _load_user_memories(db, current_user.id, unlocked_ids)
 
     per_week: Counter = Counter()
     mood_sums: dict[datetime, float] = {}
@@ -166,9 +176,10 @@ async def get_insights_word_cloud(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     limit: int = 50,
+    unlocked_ids: set[str] = Depends(get_unlocked_memory_ids),
 ) -> list[WordCloudData]:
     """Return the most frequent non-stopword terms in the user's memories."""
-    memories = await _load_user_memories(db, current_user.id)
+    memories = await _load_user_memories(db, current_user.id, unlocked_ids)
 
     counts: Counter = Counter()
     for memory in memories:
@@ -203,9 +214,10 @@ async def get_insights_word_cloud(
 async def get_insights_achievements(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    unlocked_ids: set[str] = Depends(get_unlocked_memory_ids),
 ) -> list[Achievement]:
     """Return achievement progress for the current user."""
-    memories = await _load_user_memories(db, current_user.id)
+    memories = await _load_user_memories(db, current_user.id, unlocked_ids)
     story_result = await db.execute(
         select(Story).where(Story.user_id == current_user.id)
     )
