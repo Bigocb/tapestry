@@ -163,6 +163,14 @@ def _sanitize_enrichment_output(
 
     event_date = _parse_event_date(raw_dict.get("event_date"), current.event_date)
 
+    # Carry fuzzy-period information through enrichment; otherwise a decade or
+    # range would be flattened to a point date and its label lost.
+    date_precision = str(raw_dict.get("date_precision") or current.date_precision or "") or None
+    date_label = str(raw_dict.get("date_label") or current.date_label or "")[:120] or None
+    event_date_end = _parse_event_date(
+        raw_dict.get("event_date_end"), current.event_date_end
+    )
+
     return StructuredMemory(
         title=title,
         summary=summary,
@@ -171,6 +179,9 @@ def _sanitize_enrichment_output(
         importance_level=importance_level,
         initial_tags=initial_tags,
         event_date=event_date,
+        date_precision=date_precision,
+        event_date_end=event_date_end,
+        date_label=date_label,
     )
 
 

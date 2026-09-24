@@ -4,6 +4,7 @@ import json
 import os
 import re
 from collections import Counter
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
@@ -264,6 +265,204 @@ def _extract_tags_fallback(raw_input: str, entities: list[EntityData]) -> list[s
     return [w.lower()[:50] for w in candidates[:5]]
 
 
+@dataclass
+class ResolvedDate:
+    """A date resolved from text, preserving how precise it actually is.
+
+    A fuzzy period ("the 80s", "middle school") is a real answer, not a missing
+    one, so it carries a representative sort date plus its precision and the
+    user's own wording rather than a fake exact date.
+    """
+
+    event_date: Optional[datetime] = None
+    precision: str = "unknown"  # exact | month | year | decade | range | unknown
+    event_date_end: Optional[datetime] = None
+    label: Optional[str] = None
+
+
+def _utc(year: int, month: int = 1, day: int = 1) -> datetime:
+    return datetime(year, month, day).replace(tzinfo=timezone.utc)
+
+
+# Decades: "the 80s", "1980s", "in the '90s". Captures 2 or 4 digits.
+_DECADE_RE = re.compile(r"\b(?:the\s+)?((?:18|19|20)?\d{2})'?s\b", re.IGNORECASE)
+
+# Named life periods that are inherently fuzzy.
+_LIFE_PERIODS = {
+    "middle school": "Middle school",
+    "junior high": "Junior high",
+    "high school": "High school",
+    "elementary school": "Elementary school",
+    "grade school": "Grade school",
+    "college": "College",
+    "university": "University",
+    "childhood": "Childhood",
+    "as a kid": "Childhood",
+    "when i was a kid": "Childhood",
+    "teenager": "Teenage years",
+    "teenage years": "Teenage years",
+    "my twenties": "Twenties",
+    "my thirties": "Thirties",
+    "my forties": "Forties",
+    "my fifties": "Fifties",
+}
+
+_IMPRECISE_CUES = re.compile(
+    r"\b(sometime|some time|around|about|roughly|approximately|circa)\b",
+    re.IGNORECASE,
+)
+
+
+def _decade_start_year(digits: str) -> int:
+    """Turn decade digits into a start year.
+
+    Four digits are used as-is ("1980" -> 1980). Two digits are interpreted
+    generously: 00-29 as 2000s, 30-99 as 1900s.
+    """
+    if len(digits) == 4:
+        return (int(digits) // 10) * 10
+    value = int(digits)
+    return (2000 if value < 30 else 1900) + value
+
+
+def _resolve_fuzzy_period(text: str) -> Optional[ResolvedDate]:
+    """Resolve coarse time expressions that are not a single precise date.
+
+    Handles explicit year ranges, decades (with early/mid/late qualifiers), and
+    named life periods. Returns None when nothing coarse is recognised.
+    """
+    lowered = text.lower()
+
+    # --- Explicit year range: "1987 to 1990", "1987-1990", "1987 and 1990".
+    range_match = re.search(
+        r"\b((?:19|20)\d{2})\s*(?:-|–|—|to|through|until|and)\s*((?:19|20)\d{2})\b",
+        text,
+    )
+    if range_match:
+        start_year = int(range_match.group(1))
+        end_year = int(range_match.group(2))
+        if start_year <= end_year:
+            label = f"{start_year}-{end_year}"
+            # Prefer a human life-period name if one is mentioned, so
+            # "middle school 87-90" reads as "Middle school (1987-1990)".
+            for key, pretty in _LIFE_PERIODS.items():
+                if key in lowered:
+                    label = f"{pretty} ({start_year}-{end_year})"
+                    break
+            return ResolvedDate(
+                event_date=_utc(start_year),
+                precision="range",
+                event_date_end=_utc(end_year, 12, 31),
+                label=label,
+            )
+
+    # --- Decades: "the 80s", "1980s", "'90s".
+    decade_match = _DECADE_RE.search(text)
+    if decade_match:
+        start_year = _decade_start_year(decade_match.group(1))
+        start_offset = start_year
+        end_offset = start_year + 9
+        qualifier = ""
+
+        if re.search(r"\bearly\b", lowered):
+            qualifier = "early "
+            end_offset = start_year + 3
+        elif re.search(r"\b(mid|middle)\b", lowered):
+            qualifier = "mid "
+            start_offset = start_year + 4
+            end_offset = start_year + 6
+        elif re.search(r"\blate\b", lowered):
+            qualifier = "late "
+            start_offset = start_year + 7
+
+        label = f"{qualifier}{start_year}s"
+        return ResolvedDate(
+            event_date=_utc(start_offset),
+            precision="decade",
+            event_date_end=_utc(end_offset, 12, 31),
+            label=label,
+        )
+
+    # --- Named life period with no explicit years, e.g. "sometime in middle
+    # school". Only used when the text signals imprecision, so a passing
+    # mention of "high school" does not fabricate a period.
+    if _IMPRECISE_CUES.search(lowered):
+        for key, pretty in _LIFE_PERIODS.items():
+            if key in lowered:
+                return ResolvedDate(
+                    event_date=None,
+                    precision="unknown",
+                    event_date_end=None,
+                    label=pretty,
+                )
+
+    return None
+
+
+def _precise_date_precision(raw_input: str) -> str:
+    """Infer how precise a resolved exact date was, from its source text."""
+    text = raw_input.lower()
+    # Explicit day: "July 29, 1976", "2024-03-15", "Christmas 2021".
+    if re.search(r"\b\d{4}-\d{2}-\d{2}\b", raw_input):
+        return "exact"
+    # Month + day, but not the leading digits of a year ("July 2024").
+    if re.search(
+        r"\b(january|february|march|april|may|june|july|august|september|october|november|december)\s+\d{1,2}(?!\d)(?:st|nd|rd|th)?\b",
+        text,
+    ):
+        return "exact"
+    if re.search(
+        r"\b(christmas|new year|halloween|valentine|thanksgiving|independence day)\b",
+        text,
+    ):
+        return "exact"
+    # Relative and weekday phrases land on a specific day.
+    if re.search(
+        r"\b(yesterday|today|last week|a week ago|last month|a month ago|"
+        r"a year ago|last year|days? ago|weeks? ago|months? ago|years? ago)\b",
+        text,
+    ):
+        return "exact"
+    if re.search(
+        r"\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b", text
+    ):
+        return "exact"
+    if re.search(r"\b(spring|summer|fall|autumn|winter)s?\b", text):
+        return "month"
+    # Month + year only: "July 2024".
+    if re.search(
+        r"\b(january|february|march|april|may|june|july|august|september|october|november|december)\s+\d{4}\b",
+        text,
+    ):
+        return "month"
+    # A bare year is the least precise "exact-ish" answer.
+    if re.search(r"\b(19|20)\d{2}\b", raw_input):
+        return "year"
+    return "exact"
+
+
+def resolve_date(raw_input: str) -> ResolvedDate:
+    """Resolve the best available date information from raw text.
+
+    Fuzzy periods (ranges, decades, named life periods) are checked first so
+    that "1987 to 1990" is preserved as a range rather than collapsed to 1987.
+    """
+    fuzzy = _resolve_fuzzy_period(raw_input)
+    if fuzzy is not None:
+        return fuzzy
+
+    precise = _extract_event_date(raw_input)
+    if precise is not None:
+        return ResolvedDate(
+            event_date=precise,
+            precision=_precise_date_precision(raw_input),
+            event_date_end=None,
+            label=None,
+        )
+
+    return ResolvedDate()
+
+
 def _extract_event_date(raw_input: str) -> Optional[datetime]:
     """Try to infer an event date from common temporal phrases in raw text."""
     text = raw_input.lower()
@@ -393,6 +592,7 @@ def _extract_event_date(raw_input: str) -> Optional[datetime]:
 def _fallback_structured_memory(raw_input: str) -> StructuredMemory:
     """Produce a safe fallback when the LLM fails."""
     entities = _extract_entities_fallback(raw_input)
+    resolved = resolve_date(raw_input)
     return StructuredMemory(
         title=raw_input[:100] if len(raw_input) <= 100 else raw_input[:97] + "...",
         summary=raw_input,
@@ -400,7 +600,10 @@ def _fallback_structured_memory(raw_input: str) -> StructuredMemory:
         mood=None,
         importance_level=5,
         initial_tags=_extract_tags_fallback(raw_input, entities),
-        event_date=_extract_event_date(raw_input),
+        event_date=resolved.event_date,
+        date_precision=resolved.precision,
+        event_date_end=resolved.event_date_end,
+        date_label=resolved.label,
     )
 
 
@@ -469,9 +672,27 @@ def _build_structured_memory(raw_dict: dict, raw_input: str) -> StructuredMemory
         try:
             event_date = datetime.fromisoformat(event_date.replace("Z", "+00:00"))
         except ValueError:
-            event_date = _extract_event_date(raw_input)
-    elif not isinstance(event_date, datetime):
-        event_date = _extract_event_date(raw_input)
+            event_date = None
+
+    # The model's date, if any, wins; otherwise resolve deterministically.
+    # Either way, fuzzy periods from the text are preserved so a range or
+    # decade is not silently collapsed to a single day.
+    resolved = resolve_date(raw_input)
+    if event_date is None:
+        event_date = resolved.event_date
+
+    date_precision = raw_dict.get("date_precision") or resolved.precision
+    date_label = raw_dict.get("date_label") or resolved.label
+    event_date_end = raw_dict.get("event_date_end")
+    if isinstance(event_date_end, str):
+        try:
+            event_date_end = datetime.fromisoformat(event_date_end.replace("Z", "+00:00"))
+        except ValueError:
+            event_date_end = None
+    if event_date_end is None:
+        event_date_end = resolved.event_date_end
+    if date_label:
+        date_label = str(date_label)[:120]
 
     return StructuredMemory(
         title=title,
@@ -481,6 +702,9 @@ def _build_structured_memory(raw_dict: dict, raw_input: str) -> StructuredMemory
         importance_level=importance_level,
         initial_tags=initial_tags,
         event_date=event_date,
+        date_precision=date_precision,
+        event_date_end=event_date_end,
+        date_label=date_label,
     )
 
 

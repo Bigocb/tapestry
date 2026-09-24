@@ -167,6 +167,15 @@ def _build_structured_memory(raw_dict: dict, fallback: StructuredMemory) -> Stru
 
     event_date = _parse_event_date(raw_dict.get("event_date"), fallback.event_date)
 
+    # Preserve fuzzy-period information. The LLM only returns a point date, so
+    # without carrying these through, "the 80s" would be flattened to a single
+    # day and the label lost.
+    date_precision = str(raw_dict.get("date_precision") or fallback.date_precision or "") or None
+    date_label = str(raw_dict.get("date_label") or fallback.date_label or "")[:120] or None
+    event_date_end = _parse_event_date(
+        raw_dict.get("event_date_end"), fallback.event_date_end
+    )
+
     return StructuredMemory(
         title=title,
         summary=summary,
@@ -175,6 +184,9 @@ def _build_structured_memory(raw_dict: dict, fallback: StructuredMemory) -> Stru
         importance_level=importance_level,
         initial_tags=initial_tags,
         event_date=event_date,
+        date_precision=date_precision,
+        event_date_end=event_date_end,
+        date_label=date_label,
     )
 
 
@@ -206,6 +218,9 @@ def _structured_memory_from_dict(data: dict[str, Any]) -> StructuredMemory:
         importance_level=importance_level,
         initial_tags=initial_tags,
         event_date=event_date,
+        date_precision=str(data.get("date_precision") or "") or None,
+        event_date_end=_parse_event_date(data.get("event_date_end"), None),
+        date_label=str(data.get("date_label") or "")[:120] or None,
     )
 
 

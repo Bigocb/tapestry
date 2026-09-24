@@ -152,6 +152,9 @@ async def _run_refinement(memory: Memory, db: AsyncSession) -> None:
     memory.importance_level = refined.importance_level
     memory.tags = refined.initial_tags
     memory.event_date = refined.event_date
+    memory.date_precision = refined.date_precision
+    memory.event_date_end = refined.event_date_end
+    memory.date_label = refined.date_label
 
 
 async def _run_enrichment(memory: Memory, db: AsyncSession) -> None:
@@ -175,9 +178,16 @@ async def _run_enrichment(memory: Memory, db: AsyncSession) -> None:
     memory.importance_level = enriched.importance_level
     memory.tags = enriched.initial_tags
     memory.event_date = enriched.event_date
+    memory.date_precision = enriched.date_precision
+    memory.event_date_end = enriched.event_date_end
+    memory.date_label = enriched.date_label
     memory.related_memory_ids = related_ids
-    # Enrichment is the final stage: flag for review if no date was found.
-    if memory.event_date is None:
+    # Enrichment is the final stage: flag for review if no time signal exists.
+    if (
+        memory.event_date is None
+        and memory.date_precision not in ("decade", "range")
+        and not memory.date_label
+    ):
         memory.needs_review = True
         memory.review_reason = "missing_date"
     else:
@@ -213,8 +223,16 @@ def _apply_overrides(memory: Memory, overrides: dict | None) -> None:
             memory.event_date = datetime.fromisoformat(
                 str(overrides["event_date"]).replace("Z", "+00:00")
             )
+            # An explicit date from the user is exact by definition.
+            memory.date_precision = "exact"
+            memory.event_date_end = None
+            memory.date_label = None
         except (TypeError, ValueError):
             pass
+    if overrides.get("date_label") is not None:
+        memory.date_label = str(overrides["date_label"])[:120] or None
+    if overrides.get("date_precision") is not None:
+        memory.date_precision = str(overrides["date_precision"])
     if overrides.get("people") is not None:
         content["people"] = [str(p) for p in overrides["people"] if p]
     if overrides.get("location") is not None:
@@ -222,13 +240,18 @@ def _apply_overrides(memory: Memory, overrides: dict | None) -> None:
 
     memory.structured_content = content
 
-    # Overrides may have supplied (or not) a date; keep review state honest.
-    if memory.event_date is None:
-        memory.needs_review = True
-        memory.review_reason = "missing_date"
-    else:
+    # Overrides may have supplied a date or period; keep review state honest.
+    has_time_signal = (
+        memory.event_date is not None
+        or memory.date_precision in ("decade", "range")
+        or bool(memory.date_label)
+    )
+    if has_time_signal:
         memory.needs_review = False
         memory.review_reason = None
+    else:
+        memory.needs_review = True
+        memory.review_reason = "missing_date"
 
 
 async def run_tracked_job(job_id: str) -> None:

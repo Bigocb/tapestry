@@ -130,6 +130,16 @@ class Memory(Base):
     # When the remembered event occurred (extracted from raw_input by agents)
     event_date = Column(TIMESTAMP, nullable=True)
 
+    # How precise that date is. 'exact' | 'month' | 'year' | 'decade' |
+    # 'range' | 'unknown'. A fuzzy period (e.g. "the 80s") is still a real
+    # answer, so it must not be treated as a missing date.
+    date_precision = Column(String(20), nullable=True)
+    # Upper bound when date_precision == 'range' (e.g. 1987-1990).
+    event_date_end = Column(TIMESTAMP, nullable=True)
+    # Human wording for fuzzy periods, shown instead of a fake exact date,
+    # e.g. "Middle school", "the 80s", "early 90s".
+    date_label = Column(String(120), nullable=True)
+
     # Review queue: set when the pipeline could not confidently complete
     # (currently: no event date could be found). review_reason is a short
     # machine-readable code, e.g. 'missing_date'.

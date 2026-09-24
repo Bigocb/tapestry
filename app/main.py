@@ -50,6 +50,21 @@ async def _apply_pending_migrations() -> None:
                 text("ALTER TABLE memories ADD COLUMN is_private BOOLEAN DEFAULT FALSE")
             )
             print("Added missing is_private column to memories table.")
+        if not await conn.run_sync(_has_column, "memories", "date_precision"):
+            await conn.execute(
+                text("ALTER TABLE memories ADD COLUMN date_precision VARCHAR(20)")
+            )
+            print("Added missing date_precision column to memories table.")
+        if not await conn.run_sync(_has_column, "memories", "event_date_end"):
+            await conn.execute(
+                text("ALTER TABLE memories ADD COLUMN event_date_end TIMESTAMP")
+            )
+            print("Added missing event_date_end column to memories table.")
+        if not await conn.run_sync(_has_column, "memories", "date_label"):
+            await conn.execute(
+                text("ALTER TABLE memories ADD COLUMN date_label VARCHAR(120)")
+            )
+            print("Added missing date_label column to memories table.")
 
         # Backfill: memories captured before the review queue existed that have
         # no event date would otherwise be invisible -- excluded from the

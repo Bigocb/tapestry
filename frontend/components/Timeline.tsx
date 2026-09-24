@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { Memory } from "./MemoryCard";
+import { formatMemoryDate, hasEventTime } from "@/lib/dates";
 import Link from "next/link";
 
 export function Timeline() {
@@ -21,8 +22,9 @@ export function Timeline() {
       );
   }, []);
 
-  const groupDate = (memory: Memory) =>
-    new Date(memory.event_date || memory.created_at).toLocaleDateString();
+  // Fuzzy periods ("Middle school", "1980s") group under their own label so a
+  // vague memory is never presented as a fake exact day.
+  const groupDate = (memory: Memory) => formatMemoryDate(memory);
 
   const byDate = memories.reduce(
     (acc: Record<string, Memory[]>, memory) => {
@@ -33,6 +35,12 @@ export function Timeline() {
     },
     {}
   );
+
+  const isFuzzy = (memory: Memory) =>
+    Boolean(memory.date_label) ||
+    memory.date_precision === "decade" ||
+    memory.date_precision === "range" ||
+    memory.date_precision === "year";
 
   return (
     <div className="max-w-3xl mx-auto">
@@ -53,10 +61,17 @@ export function Timeline() {
                     {memory.title || memory.summary || memory.raw_input}
                   </Link>
                   <p className="text-sm text-gray-500">
-                    {new Date(memory.event_date || memory.created_at).toLocaleTimeString([], {
-                      hour: "2-digit",
-                      minute: "2-digit",
-                    })}
+                    {isFuzzy(memory)
+                      ? "Approximate"
+                      : hasEventTime(memory) && memory.event_date
+                        ? new Date(memory.event_date).toLocaleTimeString([], {
+                            hour: "2-digit",
+                            minute: "2-digit",
+                          })
+                        : new Date(memory.created_at).toLocaleTimeString([], {
+                            hour: "2-digit",
+                            minute: "2-digit",
+                          })}
                   </p>
                 </li>
               ))}

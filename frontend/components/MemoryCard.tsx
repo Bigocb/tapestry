@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePrivacy } from "@/lib/privacy";
+import { formatMemoryDate } from "@/lib/dates";
 
 export interface Memory {
   id: string;
@@ -12,6 +13,9 @@ export interface Memory {
   processing_state?: string;
   created_at: string;
   event_date?: string;
+  date_precision?: string;
+  event_date_end?: string;
+  date_label?: string;
   mood?: string;
   tags?: string[];
   people?: string[];
@@ -97,9 +101,7 @@ export function MemoryCard({
         </div>
       </div>
       <p className="text-sm text-gray-500 mt-1">
-        {memory.event_date
-          ? new Date(memory.event_date).toLocaleDateString()
-          : new Date(memory.created_at).toLocaleDateString()}
+        {formatMemoryDate(memory)}
         {" "}
         · {memory.processing_state}
         {memory.is_private && (

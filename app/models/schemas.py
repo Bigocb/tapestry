@@ -108,6 +108,26 @@ class StructuredMemory(BaseModel):
     event_date: Optional[datetime] = Field(
         None, description="When the remembered event occurred (ISO 8601)"
     )
+    date_precision: Optional[str] = Field(
+        None,
+        description="'exact' | 'month' | 'year' | 'decade' | 'range' | 'unknown'",
+    )
+    event_date_end: Optional[datetime] = Field(
+        None, description="Upper bound when date_precision is 'range'"
+    )
+    date_label: Optional[str] = Field(
+        None, description="Human wording for a fuzzy period, e.g. 'the 80s'"
+    )
+
+    @field_validator("date_precision")
+    @classmethod
+    def validate_date_precision(cls, v):
+        if v is None:
+            return v
+        allowed = ["exact", "month", "year", "decade", "range", "unknown"]
+        if v not in allowed:
+            raise ValueError(f"date_precision must be one of {allowed}")
+        return v
 
 
 class MemoryCapture(BaseModel):
@@ -145,6 +165,9 @@ class MemoryResponse(BaseModel):
     processing_state: str  # 'raw', 'refined', 'enriched', 'ready'
     related_memory_ids: List[UUID] = Field(default_factory=list)
     event_date: Optional[datetime] = None
+    date_precision: Optional[str] = None
+    event_date_end: Optional[datetime] = None
+    date_label: Optional[str] = None
     people: List[str] = Field(default_factory=list)
     location: Optional[str] = None
     needs_review: bool = False
@@ -205,6 +228,9 @@ class MemoryUpdate(BaseModel):
     importance_level: Optional[int] = Field(None, ge=1, le=10)
     related_memory_ids: Optional[List[UUID]] = None
     event_date: Optional[datetime] = None
+    date_precision: Optional[str] = None
+    event_date_end: Optional[datetime] = None
+    date_label: Optional[str] = None
     people: Optional[List[str]] = None
     location: Optional[str] = None
     is_private: Optional[bool] = None

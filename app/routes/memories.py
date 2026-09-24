@@ -131,18 +131,37 @@ def _extract_people_and_location(structured_content: dict | None) -> tuple[list[
     return sorted(people), location
 
 
+def _apply_memory_date_fields(memory: Memory, structured) -> None:
+    """Copy resolved date fields from a StructuredMemory onto the row.
+
+    Keeps event_date, precision, range end and label together so a fuzzy
+    period survives persistence instead of being flattened to a single day.
+    """
+    memory.event_date = structured.event_date
+    memory.date_precision = getattr(structured, "date_precision", None)
+    memory.event_date_end = getattr(structured, "event_date_end", None)
+    memory.date_label = getattr(structured, "date_label", None)
+
+
 def _apply_review_flags(memory: Memory) -> None:
     """Flag a memory for the review queue when the pipeline couldn't complete.
 
-    Currently the only reason is a missing event date: without one the memory
-    cannot be placed on the timeline, so it is parked for the user to fix.
+    A missing event date is the current reason: without one the memory cannot
+    be placed on the timeline. A fuzzy period (decade, range, named life
+    period) is a real answer, not a missing one, so a dated-but-fuzzy memory is
+    NOT sent to review.
     """
-    if memory.event_date is None:
-        memory.needs_review = True
-        memory.review_reason = "missing_date"
-    else:
+    has_time_signal = (
+        memory.event_date is not None
+        or memory.date_precision in ("decade", "range")
+        or bool(memory.date_label)
+    )
+    if has_time_signal:
         memory.needs_review = False
         memory.review_reason = None
+    else:
+        memory.needs_review = True
+        memory.review_reason = "missing_date"
 
 
 def _memory_response(
@@ -172,6 +191,9 @@ def _memory_response(
             processing_state=memory.processing_state,
             related_memory_ids=[],
             event_date=memory.event_date,
+            date_precision=memory.date_precision,
+            event_date_end=memory.event_date_end,
+            date_label=memory.date_label,
             people=[],
             location=None,
             needs_review=bool(memory.needs_review),
@@ -199,6 +221,9 @@ def _memory_response(
         processing_state=memory.processing_state,
         related_memory_ids=memory.related_memory_ids,
         event_date=memory.event_date,
+        date_precision=memory.date_precision,
+        event_date_end=memory.event_date_end,
+        date_label=memory.date_label,
         people=people,
         location=location,
         needs_review=bool(memory.needs_review),
@@ -267,7 +292,7 @@ async def _structure_and_update_memory(
     memory.mood = structured.mood
     memory.importance_level = structured.importance_level
     memory.tags = structured.initial_tags
-    memory.event_date = structured.event_date
+    _apply_memory_date_fields(memory, structured)
 
     # Merge form-only fields (people, location) into structured_content.
     existing = memory.structured_content or {}
