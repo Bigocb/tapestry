@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { Memory } from "./MemoryCard";
-import { formatMemoryDate, hasEventTime } from "@/lib/dates";
+import { formatMemoryDate, timelineGroupKey } from "@/lib/dates";
 import Link from "next/link";
 
 export function Timeline() {
@@ -22,19 +22,30 @@ export function Timeline() {
       );
   }, []);
 
-  // Fuzzy periods ("Middle school", "1980s") group under their own label so a
-  // vague memory is never presented as a fake exact day.
-  const groupDate = (memory: Memory) => formatMemoryDate(memory);
-
+  // Group by period: two memories belong in the same section when they share a
+  // fuzzy label ("Middle school" and "Middle school (1987-1990)" merge) or a
+  // date. Exact-date memories still get one section per day.
   const byDate = memories.reduce(
     (acc: Record<string, Memory[]>, memory) => {
-      const date = groupDate(memory);
-      if (!acc[date]) acc[date] = [];
-      acc[date].push(memory);
+      const key = timelineGroupKey(memory);
+      if (!acc[key]) acc[key] = [];
+      acc[key].push(memory);
       return acc;
     },
     {}
   );
+
+  // Show groups in the order the timeline returned them (chronological), so
+  // labelled periods appear wherever their anchor dates place them.
+  const groupOrder: string[] = [];
+  const seen = new Set<string>();
+  for (const memory of memories) {
+    const key = timelineGroupKey(memory);
+    if (!seen.has(key)) {
+      seen.add(key);
+      groupOrder.push(key);
+    }
+  }
 
   const isFuzzy = (memory: Memory) =>
     Boolean(memory.date_label) ||
@@ -47,37 +58,48 @@ export function Timeline() {
       <h1 className="text-2xl font-bold mb-6">Timeline</h1>
       {error && <p className="text-red-600">{error}</p>}
       <div className="border-l-2 border-indigo-200 ml-3 space-y-6">
-        {Object.entries(byDate).map(([date, items]) => (
-          <div key={date} className="relative pl-6">
-            <div className="absolute -left-[9px] top-1 w-4 h-4 rounded-full bg-indigo-600 border-2 border-white"></div>
-            <h2 className="font-semibold text-lg mb-2">{date}</h2>
-            <ul className="space-y-2">
-              {items.map((memory) => (
-                <li key={memory.id} className="bg-white border rounded p-3">
-                  <Link
-                    href={`/memories/${memory.id}`}
-                    className="font-medium hover:text-indigo-600"
-                  >
-                    {memory.title || memory.summary || memory.raw_input}
-                  </Link>
-                  <p className="text-sm text-gray-500">
-                    {isFuzzy(memory)
-                      ? "Approximate"
-                      : hasEventTime(memory) && memory.event_date
-                        ? new Date(memory.event_date).toLocaleTimeString([], {
-                            hour: "2-digit",
-                            minute: "2-digit",
-                          })
-                        : new Date(memory.created_at).toLocaleTimeString([], {
-                            hour: "2-digit",
-                            minute: "2-digit",
-                          })}
-                  </p>
-                </li>
-              ))}
-            </ul>
-          </div>
-        ))}
+        {groupOrder.map((key) => {
+          const items = byDate[key];
+          // Section heading: the group's own wording. For a merged label
+          // group, prefer the most descriptive (longest) label present.
+          const heading =
+            items.find((m) => m.date_label)?.date_label ||
+            formatMemoryDate(items[0]);
+
+          return (
+            <div key={key} className="relative pl-6">
+              <div className="absolute -left-[9px] top-1 w-4 h-4 rounded-full bg-indigo-600 border-2 border-white"></div>
+              <h2 className="font-semibold text-lg mb-2">{heading}</h2>
+              <ul className="space-y-2">
+                {items.map((memory) => (
+                  <li key={memory.id} className="bg-white border rounded p-3">
+                    <Link
+                      href={`/memories/${memory.id}`}
+                      className="font-medium hover:text-indigo-600"
+                    >
+                      {memory.title || memory.summary || memory.raw_input}
+                    </Link>
+                    <p className="text-sm text-gray-500">
+                      {isFuzzy(memory)
+                        ? memory.date_label && memory.date_label !== heading
+                          ? memory.date_label
+                          : "Approximate"
+                        : memory.event_date
+                          ? new Date(memory.event_date).toLocaleTimeString([], {
+                              hour: "2-digit",
+                              minute: "2-digit",
+                            })
+                          : new Date(memory.created_at).toLocaleTimeString([], {
+                              hour: "2-digit",
+                              minute: "2-digit",
+                            })}
+                    </p>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          );
+        })}
         {memories.length === 0 && !error && <p>No memories yet.</p>}
       </div>
     </div>

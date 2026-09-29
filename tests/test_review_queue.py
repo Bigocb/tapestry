@@ -255,6 +255,85 @@ class TestSettingDateClearsReview:
         assert queue.json()["total"] == 0
 
 
+class TestStaleFlagReconciliation:
+    """A memory with a time signal must never stay in the review queue.
+
+    Memories processed before fuzzy periods counted as time signals were
+    flagged, and only a PATCH re-evaluated them -- so a reviewed-and-set memory
+    silently stayed queued. This pins the rule the startup reconciliation
+    applies so it cannot regress.
+    """
+
+    @pytest.mark.asyncio
+    async def test_labeled_memory_is_never_in_review(
+        self, client, test_db, setup_users, get_auth_token
+    ):
+        user1, _ = await setup_users()
+        token = get_auth_token("alice", "password123")
+
+        memory = Memory(
+            raw_input="met my best friend",
+            input_type="text",
+            user_id=str(user1.id),
+            structured_content={"title": "Best friend", "summary": "s"},
+            tags=[],
+            importance_level=5,
+            processing_state="enriched",
+            related_memory_ids=[],
+            # The stale pre-fix state: labeled but still flagged.
+            date_label="Middle school",
+            date_precision="unknown",
+            needs_review=True,
+            review_reason="missing_date",
+        )
+        test_db.add(memory)
+        await test_db.commit()
+
+        # Any PATCH re-evaluates the flag; touch one field to trigger it.
+        response = client.patch(
+            f"/api/memories/{memory.id}",
+            json={"importance_level": 6},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["date_label"] == "Middle school"
+        assert data["needs_review"] is False
+        assert data["review_reason"] is None
+
+    @pytest.mark.asyncio
+    async def test_range_memory_is_never_in_review(
+        self, client, test_db, setup_users, get_auth_token
+    ):
+        user1, _ = await setup_users()
+        token = get_auth_token("alice", "password123")
+
+        memory = Memory(
+            raw_input="classmate's house",
+            input_type="text",
+            user_id=str(user1.id),
+            structured_content={"title": "Classmate", "summary": "s"},
+            tags=[],
+            importance_level=5,
+            processing_state="enriched",
+            related_memory_ids=[],
+            date_precision="range",
+            needs_review=True,
+            review_reason="missing_date",
+        )
+        test_db.add(memory)
+        await test_db.commit()
+
+        response = client.patch(
+            f"/api/memories/{memory.id}",
+            json={"importance_level": 5},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        assert response.json()["needs_review"] is False
+
+
 class TestCaptureSetsReviewFlag:
     """Capturing text with no inferable date flags the memory for review."""
 

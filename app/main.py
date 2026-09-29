@@ -195,6 +195,35 @@ async def _apply_pending_migrations() -> None:
                 f"Backfilled undated memories: {recovered} dated, {flagged} queued for review."
             )
 
+        # Reconcile review flags: memories processed before fuzzy periods were
+        # treated as real answers can carry needs_review even though they have
+        # a label, a decade or a range. Only a PATCH re-evaluated the flag, so
+        # reviewed-and-set memories silently stayed in the queue. Heal them.
+        reconcile = await conn.execute(
+            text(
+                "SELECT COUNT(*) FROM memories "
+                "WHERE needs_review = 1 "
+                "AND (event_date IS NOT NULL "
+                "     OR date_precision IN ('decade', 'range') "
+                "     OR date_label IS NOT NULL AND date_label <> '')"
+            )
+        )
+        stale = int(reconcile.scalar_one())
+        if stale:
+            await conn.execute(
+                text(
+                    "UPDATE memories SET needs_review = 0, review_reason = NULL "
+                    "WHERE needs_review = 1 "
+                    "AND (event_date IS NOT NULL "
+                    "     OR date_precision IN ('decade', 'range') "
+                    "     OR date_label IS NOT NULL AND date_label <> '')"
+                )
+            )
+            print(
+                f"Reconciled review flags: {stale} memories with a time signal "
+                "were still queued; cleared."
+            )
+
     # Backfill first-class entities from the JSON still stored in
     # structured_content, then record that it has been done.
     async with engine.begin() as conn:
