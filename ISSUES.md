@@ -1,18 +1,21 @@
 # MEMIND Issues - Vertical Slices
 
-> **Status snapshot** — last reconciled 2026-09-22 against `master` @ `3718bf9`.
+> **Status snapshot** — last reconciled 2026-09-29 against `master` @ `4cb7df2`.
 >
-> **Done (verified by code + tests):** Issues 2, 3, 4\*, 5, 6, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26
-> **Partial:** Issue 1 (schema + migration + SQLite-local; no Render Postgres/pgvector instance), Issue 4\* (voice transcription is a 501 stub), Issue 7 (embeddings work via Ollama with a deterministic local fallback; **pgvector ANN search not used — similarity is computed in Python**)
-> **Not started:** Issue 27 (Render deployment)
+> **Done (verified by code + tests):** Issues 2, 3, 4, 5, 6, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26
+> **Partial:** Issue 1 (Postgres is now provisioned, but **the pgvector extension is not installed** — the database has only `plpgsql`; the schema, indexes and cross-DB type decorators are in place), Issue 7 (embeddings work via Ollama with a deterministic local fallback; **similarity is still computed in Python** — no ANN index, because pgvector is absent)
+> **Superseded:** Issue 27 — the deployment target changed. MEMIND runs in Docker Compose with Postgres on the homelab box, published through Traefik and cloudflared at `memory.cloutier.work`. The service is live; the Render-specific acceptance criteria no longer apply.
+> **Not started:** Phase 9, Issues 28–35 (Tellings).
 >
 > **Key deviations from original plan:**
-> - **Storage:** local dev runs on SQLite (`memind.db`); Postgres/pgvector is designed for but not provisioned.
+> - **Storage:** production runs on Postgres 16 in Docker on the homelab box. SQLite (`memind.db`) remains the local-dev default.
 > - **Search:** full-text + semantic ranking done in Python over fetched rows, not Postgres `tsquery`/pgvector ANN.
 > - **Agents:** Ollama Cloud (`ollama.com/v1`, `gemma4:31b`) is primary. Story generation implements a Claude Opus fallback (`ANTHROPIC_API_KEY`), gated on a response-quality check; capture/refinement/enrichment are Ollama-only.
-> - **Tests:** 209 passing, 1 skipped (pgvector); suite runs on in-memory SQLite.
+> - **Transcription:** local `faster-whisper`; Issue 4's backend is wired. A 501 is still returned when the model or its dependency is genuinely unavailable — that is error handling, not the old stub.
+> - **Tests:** 384 passing, 1 skipped (the pgvector extension check); suite runs on in-memory SQLite.
+> - **Beyond the plan:** first-class entities, the privacy lock, the review queue and fuzzy dates all shipped outside the numbered issues, so this list understates the delivered surface.
 >
-> **Remaining work:** Issue 27 (deploy), plus active iteration on capture/parsing quality (Issues 4–6 area).
+> **Remaining work:** the pgvector half of Issue 1 (and the ANN search it would unblock in Issue 7), Phase 9 (Tellings, Issues 28–35), and active iteration on capture/parsing quality (Issues 4–6 area).
 
 ---
 
@@ -37,7 +40,7 @@ Create a PostgreSQL 15+ instance on Render with the pgvector extension enabled. 
 - [x] Connection string available (DATABASE_URL env var documented)
 - [x] Test: Insert a test memory with embedding and query it via pgvector
 
-> **Status: PARTIAL.** Schema, indexes, and cross-DB type decorators are in place and the pgvector extension is wired for Postgres. No Render Postgres instance exists yet; local dev uses SQLite and the pgvector test is skipped (`information_schema` queries are Postgres-only). Folded into Issue 27.
+> **Status: PARTIAL.** Schema, indexes and cross-DB type decorators are in place, and Postgres is provisioned (Docker, on the homelab box). **The pgvector extension is not installed** — the database has only `plpgsql` — so the pgvector criteria and the ivfflat index remain unmet and the extension check is still skipped. Render is no longer the target; see Issue 27.
 
 ---
 
@@ -134,7 +137,7 @@ Support multipart form data for file uploads.
 - [x] Async refinement job scheduled in background
 - [x] Test: Can capture voice/text, get immediate response, verify DB state
 
-> **Status: PARTIAL.** Text/form capture, `state='raw'`, and background scheduling all work. `_transcribe_audio` currently raises `501 Not Implemented` — no transcription backend is wired. The frontend records via `MediaRecorder` and posts the blob, but the backend rejects it.
+> **Status: DONE.** Text/form capture, `state='raw'` and background scheduling all work. Voice is transcribed locally with `faster-whisper`, decoded off the event loop, cached per model, and spooled to a temp file (the library does not accept raw bytes). A 501 is returned only when the model or its dependency is genuinely unavailable — error handling, not a stub.
 
 ---
 
@@ -229,7 +232,7 @@ This is used by:
 - [ ] Queries by cosine distance (pgvector similarity)
 - [x] Test: Insert memory with embedding, query by semantic similarity, verify results
 
-> **Status: PARTIAL.** `generate_embedding` calls the Ollama embeddings API (`nomic-embed-text`) with a deterministic 384-dim local fallback. Embeddings are stored as serialized JSON strings in a `String(3000)` column, and cosine similarity is computed **in Python**, not via pgvector ANN. Migrate to a native `vector` column + ivfflat index when Postgres is provisioned (Issue 27).
+> **Status: PARTIAL.** `generate_embedding` calls the Ollama embeddings API (`nomic-embed-text`) with a deterministic 384-dim local fallback. Embeddings are serialized JSON strings in an unbounded `Text` column — the original `String(3000)` silently overflowed once the data reached Postgres, where the limit is enforced. Cosine similarity is still computed **in Python**; migrating to a native `vector` column + ivfflat index is blocked on the pgvector extension (Issue 1).
 
 ---
 
@@ -588,7 +591,7 @@ Components:
 - [x] Error handling (display errors to user)
 - [x] Test: Record voice, submit, verify memory appears in list
 
-> **Status: MOSTLY DONE.** `CapturePanel` supports text/voice/form modes; voice uses `MediaRecorder` → `captureVoice`. No audio waveform visualization, no separate date picker (event date is edited later in `MemoryEditor`), and no live transcription. Voice submit returns 501 until Issue 4's transcription backend is wired.
+> **Status: MOSTLY DONE.** `CapturePanel` supports text/voice/form modes; voice uses `MediaRecorder` → `captureVoice`. No audio waveform visualization, no separate date picker (event date is edited later in `MemoryEditor`), and no live/incremental transcription. Voice submit is transcribed server-side.
 
 ---
 
