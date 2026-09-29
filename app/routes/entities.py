@@ -17,12 +17,18 @@ from app.db.entities import (
     count_entities_by_kind,
     get_entity_detail,
     list_entities,
+    merge_entities,
+    suggest_merges,
+    undo_merge,
 )
 from app.dependencies import get_current_user
 from app.models.schemas import (
     EntityDetail,
     EntityListResponse,
     EntityMemoryRef,
+    EntityMergeRequest,
+    EntityMergeResponse,
+    EntityMergeSuggestion,
     EntitySummary,
 )
 from app.privacy import get_unlocked_memory_ids
@@ -101,6 +107,104 @@ async def get_entity_counts(
     return await count_entities_by_kind(db, str(current_user.id), unlocked_ids)
 
 
+@router.get(
+    "/entities/merge-suggestions",
+    response_model=list[EntityMergeSuggestion],
+    summary="Suggest possible duplicate entities",
+    description=(
+        "Since only exact names auto-link, near-matches are surfaced here for "
+        "confirmation. Nothing is merged automatically."
+    ),
+)
+async def get_merge_suggestions(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    unlocked_ids: set[str] = Depends(get_unlocked_memory_ids),
+) -> list[EntityMergeSuggestion]:
+    """Return entity pairs that may refer to the same thing."""
+    rows = await suggest_merges(db, str(current_user.id), unlocked_ids)
+
+    return [
+        EntityMergeSuggestion(
+            source=_summary(source, source.mention_count),
+            target=_summary(target, target.mention_count),
+            reason=reason,
+        )
+        for source, target, reason in rows
+    ]
+
+
+@router.post(
+    "/entities/merge",
+    response_model=EntityMergeResponse,
+    summary="Merge two entities",
+    description=(
+        "Fold the source entity into the target: mentions and aliases move over "
+        "and the source becomes a tombstone. Reversible via the returned "
+        "merge_id."
+    ),
+)
+async def merge_entities_endpoint(
+    request: EntityMergeRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> EntityMergeResponse:
+    """Merge one entity into another."""
+    try:
+        merge = await merge_entities(
+            db,
+            str(current_user.id),
+            source_id=str(request.source_id),
+            target_id=str(request.target_id),
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+        )
+
+    await db.commit()
+
+    return EntityMergeResponse(
+        merge_id=merge.id,
+        source_id=merge.source_entity_id,
+        target_id=merge.target_entity_id,
+        moved_mention_count=len(merge.moved_mention_ids or []),
+        moved_alias_count=len(merge.moved_alias_ids or []),
+    )
+
+
+@router.post(
+    "/entities/merge/{merge_id}/undo",
+    response_model=EntityMergeResponse,
+    summary="Undo a merge",
+    description="Restore exactly the mentions and aliases that moved.",
+)
+async def undo_merge_endpoint(
+    merge_id: UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> EntityMergeResponse:
+    """Reverse a previously applied merge."""
+    try:
+        merge = await undo_merge(db, str(current_user.id), str(merge_id))
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)
+        )
+
+    await db.commit()
+
+    return EntityMergeResponse(
+        merge_id=merge.id,
+        source_id=merge.source_entity_id,
+        target_id=merge.target_entity_id,
+        moved_mention_count=len(merge.moved_mention_ids or []),
+        moved_alias_count=len(merge.moved_alias_ids or []),
+    )
+
+
+# Declared last on purpose: this path would otherwise capture the static routes
+# above ("/entities/counts", "/entities/merge", ...) as an entity id.
 @router.get(
     "/entities/{entity_id}",
     response_model=EntityDetail,

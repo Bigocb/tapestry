@@ -442,3 +442,111 @@ class TestEntityCounts:
         )
 
         assert response.json()["person"] == 0
+
+
+class TestMergeEndpoints:
+    """POST /api/entities/merge, /undo and GET /merge-suggestions."""
+
+    async def _entity_id(self, client, token, name):
+        listing = client.get(
+            "/api/entities?limit=200",
+            headers={"Authorization": f"Bearer {token}"},
+        ).json()
+        return next(i["id"] for i in listing["items"] if i["canonical_name"] == name)
+
+    @pytest.mark.asyncio
+    async def test_merge_suggestions_surface_prefix_pairs(
+        self, client, test_db, setup_users, get_auth_token
+    ):
+        user1, _ = await setup_users()
+        token = get_auth_token("alice", "password123")
+        await _seed_memory(test_db, str(user1.id), [("person", "Sarah", None)], "a")
+        await _seed_memory(
+            test_db, str(user1.id), [("person", "Sarah Smith", None)], "b"
+        )
+
+        response = client.get(
+            "/api/entities/merge-suggestions",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert len(data) == 1
+        assert {data[0]["source"]["canonical_name"], data[0]["target"]["canonical_name"]} == {
+            "Sarah",
+            "Sarah Smith",
+        }
+
+    @pytest.mark.asyncio
+    async def test_merge_then_undo_via_api(
+        self, client, test_db, setup_users, get_auth_token
+    ):
+        user1, _ = await setup_users()
+        token = get_auth_token("alice", "password123")
+        await _seed_memory(test_db, str(user1.id), [("person", "Sarah", None)], "a")
+        await _seed_memory(
+            test_db, str(user1.id), [("person", "Sarah Smith", None)], "b"
+        )
+
+        sarah = await self._entity_id(client, token, "Sarah")
+        smith = await self._entity_id(client, token, "Sarah Smith")
+
+        merge = client.post(
+            "/api/entities/merge",
+            json={"source_id": smith, "target_id": sarah},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert merge.status_code == 200
+        merge_id = merge.json()["merge_id"]
+
+        # Only one entity remains visible.
+        listing = client.get(
+            "/api/entities?kind=person", headers={"Authorization": f"Bearer {token}"}
+        ).json()
+        assert [i["canonical_name"] for i in listing["items"]] == ["Sarah"]
+        assert listing["items"][0]["mention_count"] == 2
+
+        undo = client.post(
+            f"/api/entities/merge/{merge_id}/undo",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert undo.status_code == 200
+
+        listing = client.get(
+            "/api/entities?kind=person", headers={"Authorization": f"Bearer {token}"}
+        ).json()
+        assert {i["canonical_name"] for i in listing["items"]} == {
+            "Sarah",
+            "Sarah Smith",
+        }
+
+    @pytest.mark.asyncio
+    async def test_merge_rejects_cross_kind(
+        self, client, test_db, setup_users, get_auth_token
+    ):
+        user1, _ = await setup_users()
+        token = get_auth_token("alice", "password123")
+        await _seed_memory(test_db, str(user1.id), [("person", "Paris", None)], "a")
+        await _seed_memory(test_db, str(user1.id), [("place", "Paris", None)], "b")
+
+        person = await self._entity_id(client, token, "Paris")
+
+        response = client.post(
+            "/api/entities/merge",
+            json={"source_id": person, "target_id": person},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        assert response.status_code == 400
+
+    @pytest.mark.asyncio
+    async def test_merge_requires_authentication(self, client):
+        response = client.post(
+            "/api/entities/merge",
+            json={
+                "source_id": "00000000-0000-0000-0000-000000000000",
+                "target_id": "00000000-0000-0000-0000-000000000001",
+            },
+        )
+        assert response.status_code in (401, 403)

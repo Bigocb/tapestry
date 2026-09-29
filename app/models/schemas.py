@@ -487,6 +487,31 @@ class EntityDetail(EntitySummary):
     memories: List[EntityMemoryRef] = Field(default_factory=list)
 
 
+class EntityMergeRequest(BaseModel):
+    """Merge one entity into another."""
+
+    source_id: UUID = Field(..., description="Entity to fold away")
+    target_id: UUID = Field(..., description="Entity to keep")
+
+
+class EntityMergeResponse(BaseModel):
+    """Result of a merge, including the audit id needed to undo it."""
+
+    merge_id: UUID
+    source_id: UUID
+    target_id: UUID
+    moved_mention_count: int
+    moved_alias_count: int
+
+
+class EntityMergeSuggestion(BaseModel):
+    """A pair of entities that may be the same thing, for the user to confirm."""
+
+    source: EntitySummary
+    target: EntitySummary
+    reason: str = Field(..., description="Why these were suggested")
+
+
 # ============================================================================
 # JOB STATUS MODELS
 # ============================================================================

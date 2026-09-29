@@ -52,6 +52,8 @@ Output a single JSON object with exactly these fields:
 - title: string, 3-12 words
 - summary: string, 1-3 sentences
 - entities: list of objects with keys type, value, and optional metadata. Extract all named people as "person" entities (full names), all locations as "place" entities, and any dates as "date" entities.
+  - For a place contained in a larger place (a cafe inside a city, a city inside a state), set metadata.parent to the larger place's name, e.g. {"type": "place", "value": "Bluebird Cafe", "metadata": {"parent": "Denver"}}.
+  - For a person, metadata may include "relation" (e.g. "wife", "brother") when the text states it. Do not invent relationships.
 - mood: string or null (a single word describing the feeling, e.g. happy, anxious, excited)
 - importance_level: integer 1-10
 - initial_tags: list of lowercase string tags, 1-5 items
@@ -77,6 +79,15 @@ Example output:
   "initial_tags": ["birth", "conway", "south carolina", "1976", "family"],
   "event_date": "1976-07-29T00:00:00"
 }
+
+Second example, showing a nested place:
+Input: "Dinner with my brother Mike at Bluebird Cafe in Denver."
+Output entities:
+[
+  {"type": "person", "value": "Mike", "metadata": {"relation": "brother"}},
+  {"type": "place", "value": "Bluebird Cafe", "metadata": {"parent": "Denver"}},
+  {"type": "place", "value": "Denver"}
+]
 
 Return ONLY valid JSON. Do not wrap it in markdown fences or add explanation."""
 
