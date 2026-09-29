@@ -795,8 +795,30 @@ async def update_memory(
     if update.related_memory_ids is not None:
         memory.related_memory_ids = [str(m_id) for m_id in update.related_memory_ids]
 
-    if update.event_date is not None:
-        memory.event_date = update.event_date
+    # Distinguish "field omitted" from "field explicitly cleared". Without this,
+    # clearing a fuzzy label in the UI (sending null) would be ignored.
+    provided = update.model_fields_set
+
+    if "event_date" in provided:
+        if update.event_date is not None:
+            memory.event_date = update.event_date
+            # An explicit date supersedes a fuzzy period; otherwise the label
+            # would keep overriding the displayed date.
+            memory.date_precision = "exact"
+            memory.event_date_end = None
+            memory.date_label = None
+        else:
+            # Explicitly cleared.
+            memory.event_date = None
+
+    if update.date_precision is not None:
+        memory.date_precision = update.date_precision
+
+    if "event_date_end" in provided:
+        memory.event_date_end = update.event_date_end
+
+    if "date_label" in provided:
+        memory.date_label = update.date_label[:120] if update.date_label else None
 
     # Copy rather than mutate in place: structured_content is a JSON column and
     # reassigning the identical dict object does not mark the attribute dirty,
@@ -816,7 +838,8 @@ async def update_memory(
         content["location"] = update.location[:100] if update.location else None
 
     # Refresh denormalized fields from structured_content, but never let the
-    # stored (agent-derived) values clobber an explicit user edit above.
+    # stored (agent-derived) values clobber an explicit user edit above. Date
+    # fields are only re-read when the user did not touch any of them.
     if isinstance(content, dict):
         if update.mood is None and content.get("mood"):
             memory.mood = content["mood"]
@@ -824,7 +847,11 @@ async def update_memory(
             memory.importance_level = content["importance_level"]
         if update.tags is None and content.get("initial_tags"):
             memory.tags = [tag.lower()[:50] for tag in content["initial_tags"] if tag]
-        if update.event_date is None and content.get("event_date"):
+
+        user_touched_date = bool(
+            provided & {"event_date", "date_label", "date_precision", "event_date_end"}
+        )
+        if not user_touched_date and content.get("event_date"):
             parsed = content["event_date"]
             if isinstance(parsed, str):
                 try:
@@ -833,6 +860,11 @@ async def update_memory(
                     parsed = None
             if parsed is not None:
                 memory.event_date = parsed
+        if not user_touched_date:
+            if content.get("date_precision"):
+                memory.date_precision = content["date_precision"]
+            if content.get("date_label"):
+                memory.date_label = content["date_label"]
 
     memory.structured_content = content
     _apply_review_flags(memory)
@@ -850,6 +882,11 @@ async def update_memory(
                 "importance_level": update.importance_level,
                 "event_date": (
                     update.event_date.isoformat() if update.event_date else None
+                ),
+                "date_precision": update.date_precision,
+                "date_label": update.date_label,
+                "event_date_end": (
+                    update.event_date_end.isoformat() if update.event_date_end else None
                 ),
                 "people": update.people,
                 "location": update.location,

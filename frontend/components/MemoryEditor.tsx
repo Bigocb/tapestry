@@ -15,6 +15,8 @@ export function MemoryEditor({ id }: { id: string }) {
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
   const [togglingLock, setTogglingLock] = useState(false);
+  // "exact" shows a date picker; "fuzzy" shows period fields (label + range).
+  const [whenMode, setWhenMode] = useState<"exact" | "fuzzy">("exact");
 
   // Fetch and apply, setting state only from async callbacks. Calling setState
   // synchronously inside an effect triggers cascading renders (and is flagged
@@ -25,6 +27,14 @@ export function MemoryEditor({ id }: { id: string }) {
       .then((data) => {
         setMemory(data);
         setOriginal(data);
+        // Open the editor in whichever mode the memory already uses.
+        setWhenMode(
+          data?.date_label ||
+            data?.date_precision === "range" ||
+            data?.date_precision === "decade"
+            ? "fuzzy"
+            : "exact"
+        );
         setError("");
       })
       .catch((err: unknown) => {
@@ -64,8 +74,20 @@ export function MemoryEditor({ id }: { id: string }) {
       if (memory.location !== original.location) payload.location = memory.location;
       if (memory.importance_level !== original.importance_level)
         payload.importance_level = memory.importance_level;
-      if (memory.event_date !== original.event_date)
-        payload.event_date = memory.event_date;
+
+      // Date fields are sent together so the backend can keep them consistent
+      // (an exact date clears a stale fuzzy label and vice versa).
+      const datesChanged =
+        memory.event_date !== original.event_date ||
+        memory.date_label !== original.date_label ||
+        memory.date_precision !== original.date_precision ||
+        memory.event_date_end !== original.event_date_end;
+      if (datesChanged) {
+        payload.event_date = memory.event_date ?? null;
+        payload.date_label = memory.date_label ?? null;
+        payload.date_precision = memory.date_precision ?? null;
+        payload.event_date_end = memory.event_date_end ?? null;
+      }
 
       if (Object.keys(payload).length === 0) {
         router.push("/search");
@@ -253,24 +275,125 @@ export function MemoryEditor({ id }: { id: string }) {
         </div>
 
         <Field
-          label="Event date"
-          hint="When the memory happened. This places it on your timeline — without it, the memory is hidden from the timeline and listed under Review."
+          label="When did this happen?"
+          hint="Use a precise date when you know it. Use 'Sometime...' for memories you can only place roughly, like a decade or a life stage."
         >
-          <input
-            type="datetime-local"
-            className="w-full border rounded p-2"
-            value={
-              memory.event_date
-                ? new Date(memory.event_date).toISOString().slice(0, 16)
-                : ""
-            }
-            onChange={(e) =>
-              update(
-                "event_date",
-                e.target.value ? new Date(e.target.value).toISOString() : undefined
-              )
-            }
-          />
+          <div className="flex gap-2 mb-2">
+            <button
+              type="button"
+              onClick={() => setWhenMode("exact")}
+              className={`px-3 py-1 rounded text-sm ${
+                whenMode === "exact"
+                  ? "bg-indigo-600 text-white"
+                  : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+              }`}
+            >
+              Exact date
+            </button>
+            <button
+              type="button"
+              onClick={() => setWhenMode("fuzzy")}
+              className={`px-3 py-1 rounded text-sm ${
+                whenMode === "fuzzy"
+                  ? "bg-indigo-600 text-white"
+                  : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+              }`}
+            >
+              Sometime / approximate
+            </button>
+          </div>
+
+          {whenMode === "exact" ? (
+            <input
+              type="datetime-local"
+              className="w-full border rounded p-2"
+              value={
+                memory.event_date
+                  ? new Date(memory.event_date).toISOString().slice(0, 16)
+                  : ""
+              }
+              onChange={(e) =>
+                update(
+                  "event_date",
+                  e.target.value
+                    ? new Date(e.target.value).toISOString()
+                    : undefined
+                )
+              }
+            />
+          ) : (
+            <div className="space-y-3 border rounded p-3 bg-gray-50">
+              <label className="block">
+                <span className="block text-xs font-medium text-gray-700 mb-1">
+                  How would you describe it? (shown on the timeline)
+                </span>
+                <input
+                  type="text"
+                  className="w-full border rounded p-2"
+                  placeholder="e.g. Middle school, the 80s, my twenties"
+                  value={memory.date_label || ""}
+                  onChange={(e) =>
+                    update("date_label", e.target.value || undefined)
+                  }
+                />
+              </label>
+              <div className="flex gap-3">
+                <label className="flex-1">
+                  <span className="block text-xs font-medium text-gray-700 mb-1">
+                    Earliest year
+                  </span>
+                  <input
+                    type="number"
+                    min={1000}
+                    max={2999}
+                    className="w-full border rounded p-2"
+                    placeholder="1987"
+                    value={
+                      memory.event_date ? new Date(memory.event_date).getFullYear() : ""
+                    }
+                    onChange={(e) => {
+                      const year = Number(e.target.value);
+                      if (!year) {
+                        update("event_date", undefined);
+                        return;
+                      }
+                      update("event_date", new Date(Date.UTC(year, 0, 1)).toISOString());
+                      update("date_precision", "range");
+                    }}
+                  />
+                </label>
+                <label className="flex-1">
+                  <span className="block text-xs font-medium text-gray-700 mb-1">
+                    Latest year (optional)
+                  </span>
+                  <input
+                    type="number"
+                    min={1000}
+                    max={2999}
+                    className="w-full border rounded p-2"
+                    placeholder="1990"
+                    value={
+                      memory.event_date_end
+                        ? new Date(memory.event_date_end).getFullYear()
+                        : ""
+                    }
+                    onChange={(e) => {
+                      const year = Number(e.target.value);
+                      update(
+                        "event_date_end",
+                        year ? new Date(Date.UTC(year, 11, 31)).toISOString() : undefined
+                      );
+                      if (year) update("date_precision", "range");
+                    }}
+                  />
+                </label>
+              </div>
+              <p className="text-xs text-gray-500">
+                Years anchor it on the timeline. The description is what you
+                actually see, so it can stay vague.
+              </p>
+            </div>
+          )}
         </Field>
 
         <Field

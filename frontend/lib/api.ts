@@ -167,6 +167,7 @@ export const api = {
     request("POST", "/auth/login", { username, password }),
   register: (username: string, email: string, password: string) =>
     request("POST", "/auth/register", { username, email, password }),
+  getSessionConfig: () => request("GET", "/auth/session-config"),
 
   captureText: (raw_input: string) =>
     request("POST", "/memories/capture/text", { raw_input }),
@@ -244,7 +245,10 @@ export const api = {
       people?: string[];
       location?: string;
       importance_level?: number;
-      event_date?: string;
+      event_date?: string | null;
+      event_date_end?: string | null;
+      date_precision?: string | null;
+      date_label?: string | null;
       is_private?: boolean;
     }
   ) => request("PATCH", `/memories/${id}`, update),  deleteMemory: (id: string) => request("DELETE", `/memories/${id}`),

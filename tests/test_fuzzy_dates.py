@@ -395,3 +395,160 @@ class TestFuzzyDatesInApi:
         assert data["date_precision"] == "decade"
         assert data["date_label"] == "1980s"
         assert data["needs_review"] is False
+
+
+class TestFuzzyDateEditing:
+    """PATCH can set and correct fuzzy periods by hand."""
+
+    @pytest.mark.asyncio
+    async def test_set_label_only_period(
+        self, client, test_db, setup_users, get_auth_token
+    ):
+        user1, _ = await setup_users()
+        token = get_auth_token("alice", "password123")
+        memory = await _seed_memory(
+            test_db, str(user1.id), "thought", "Thought", needs_review=True
+        )
+
+        response = client.patch(
+            f"/api/memories/{memory.id}",
+            json={"date_label": "Middle school", "date_precision": "unknown"},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["date_label"] == "Middle school"
+        # A labelled period counts as time, so it leaves the review queue.
+        assert data["needs_review"] is False
+
+    @pytest.mark.asyncio
+    async def test_set_range_period(
+        self, client, test_db, setup_users, get_auth_token
+    ):
+        user1, _ = await setup_users()
+        token = get_auth_token("alice", "password123")
+        memory = await _seed_memory(
+            test_db, str(user1.id), "thought", "Thought", needs_review=True
+        )
+
+        response = client.patch(
+            f"/api/memories/{memory.id}",
+            json={
+                "event_date": "1987-01-01T00:00:00Z",
+                "event_date_end": "1990-12-31T00:00:00Z",
+                "date_precision": "range",
+                "date_label": "Middle school (1987-1990)",
+            },
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["date_precision"] == "range"
+        assert data["date_label"] == "Middle school (1987-1990)"
+        assert data["event_date_end"] is not None
+
+        timeline = client.get(
+            "/api/timeline", headers={"Authorization": f"Bearer {token}"}
+        )
+        assert len(timeline.json()) == 1
+
+    @pytest.mark.asyncio
+    async def test_exact_date_supersedes_fuzzy_label(
+        self, client, test_db, setup_users, get_auth_token
+    ):
+        """Giving a precise date must clear the old vague label."""
+        user1, _ = await setup_users()
+        token = get_auth_token("alice", "password123")
+        memory = await _seed_memory(
+            test_db,
+            str(user1.id),
+            "thought",
+            "Thought",
+            date_label="Middle school",
+            date_precision="unknown",
+        )
+
+        response = client.patch(
+            f"/api/memories/{memory.id}",
+            json={"event_date": "1988-09-01T00:00:00Z"},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["date_precision"] == "exact"
+        assert data["date_label"] is None
+        assert data["event_date_end"] is None
+
+    @pytest.mark.asyncio
+    async def test_editing_fuzzy_period_is_not_clobbered(
+        self, client, test_db, setup_users, get_auth_token
+    ):
+        """Stored agent dates must not overwrite a user's period edit."""
+        user1, _ = await setup_users()
+        token = get_auth_token("alice", "password123")
+
+        memory = Memory(
+            raw_input="thought",
+            input_type="text",
+            user_id=str(user1.id),
+            structured_content={
+                "title": "T",
+                "summary": "S",
+                "entities": [],
+                # The agent stored an exact date here.
+                "event_date": "1980-01-01T00:00:00Z",
+                "date_precision": "exact",
+            },
+            tags=[],
+            mood=None,
+            importance_level=5,
+            processing_state="enriched",
+            related_memory_ids=[],
+            event_date=datetime(1980, 1, 1, tzinfo=timezone.utc),
+            date_precision="exact",
+        )
+        test_db.add(memory)
+        await test_db.commit()
+        await test_db.refresh(memory)
+
+        response = client.patch(
+            f"/api/memories/{memory.id}",
+            json={"date_label": "Middle school", "date_precision": "unknown"},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["date_label"] == "Middle school"
+        assert data["date_precision"] == "unknown"
+
+    @pytest.mark.asyncio
+    async def test_clearing_the_label_removes_the_period(
+        self, client, test_db, setup_users, get_auth_token
+    ):
+        """Sending an explicit null must clear the label, not be ignored."""
+        user1, _ = await setup_users()
+        token = get_auth_token("alice", "password123")
+        memory = await _seed_memory(
+            test_db,
+            str(user1.id),
+            "thought",
+            "Thought",
+            date_label="Middle school",
+            date_precision="unknown",
+        )
+
+        response = client.patch(
+            f"/api/memories/{memory.id}",
+            json={"date_label": None, "date_precision": None},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["date_label"] is None
+        # With no time information left, it returns to the review queue.
+        assert data["needs_review"] is True
