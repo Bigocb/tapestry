@@ -35,11 +35,29 @@ MEMIND uses JWT-based stateless authentication. All protected endpoints require 
 `POST /api/auth/refresh` — [`app/routes/auth.py`](../app/routes/auth.py)
 
 1. Accepts `TokenRefreshRequest` containing the existing token
-2. Decodes the token (currently without strict expiration checking — see note below)
-3. Verifies the user still exists in the database
+2. Decodes it with `verify_exp=False`, so a **recently expired** token can be
+   exchanged for a fresh one (the signature is still verified)
+3. Verifies the user still exists
 4. Issues a new token with a fresh expiration
 
-> **Note**: The current refresh implementation decodes the token without verifying expiration. This is documented as a simplification; production use would require a separate refresh token mechanism with proper expiration handling.
+> **Note**: `decode_access_token(token, verify_exp=...)` exists for this reason.
+> Everywhere else expiration is enforced. A production setup would add a
+> separate refresh token with its own lifetime rather than reusing the access
+> token.
+
+## Session Inactivity Timeout
+
+The client enforces an idle timeout, not the server:
+
+- `GET /api/auth/session-config` (unauthenticated) returns
+  `{idle_timeout_seconds, warning_seconds}` from `SESSION_IDLE_MINUTES` and
+  `SESSION_IDLE_WARNING_SECONDS`
+- The frontend tracks activity, warns with a live countdown, and signs out
+  when the period elapses
+
+It is unauthenticated on purpose: the login page needs the policy before a token
+exists, and it contains no secrets. Because enforcement is client-side it is a
+privacy convenience rather than a hard security boundary.
 
 ## Route Protection
 
@@ -50,7 +68,8 @@ Protected endpoints use the `get_current_user` dependency from [`app/dependencie
 3. Loads the `User` from the database by `user_id`
 4. Returns the `User` ORM object for use in the route handler
 
-All memory-related endpoints (e.g., `POST /api/memories/capture`) require authentication via this dependency.
+Every protected query additionally filters by `user_id`, so users cannot read
+each other's data even by guessing ids.
 
 ## JWT Configuration
 
@@ -82,7 +101,9 @@ All 20 auth tests pass against SQLite in-memory database.
 
 ## Security Considerations
 
-- The default secret key should never be used in production; set `JWT_SECRET_KEY` via environment variable
+- The default secret key must never be used in production; set `JWT_SECRET_KEY`
 - CORS currently allows `localhost:3000` and `localhost:8000` — restrict in production
-- Token refresh does not currently validate expiration strictly
-- No rate limiting on registration or login endpoints yet
+- The idle timeout is enforced client-side, so it is not tamper-proof
+- No rate limiting on registration or login yet
+- The privacy lock is a shoulder-surfing shield: any authenticated user of the
+  account can unlock any memory

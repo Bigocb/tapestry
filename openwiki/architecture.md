@@ -1,7 +1,7 @@
 ---
 type: Architecture
 title: MEMIND Architecture
-description: FastAPI application structure, routing, middleware, tech stack decisions, and how the components fit together.
+description: FastAPI application structure, routing, middleware, dependency injection, and how the components fit together.
 tags: [memind, architecture, fastapi, routing, middleware]
 ---
 
@@ -9,85 +9,109 @@ tags: [memind, architecture, fastapi, routing, middleware]
 
 ## Application Entry Point
 
-The application starts in [`app/main.py`](../app/main.py), which creates a `FastAPI` instance with:
+[`app/main.py`](../app/main.py) creates the `FastAPI` instance and owns startup:
 
-- **Title**: `MEMIND API`
-- **Version**: `0.1.0`
-- **OpenAPI tags**: health, auth, memories, search, stories, timeline, insights
-- **Lifespan**: Simple startup/shutdown logging via `asynccontextmanager`
-- **CORS**: Allows `localhost:3000` and `localhost:8000` origins, with credentials and all methods/headers
+- Title `MEMIND API`, version `0.1.0`
+- OpenAPI tags: health, auth, memories, search, stories, timeline, insights,
+  review, entities, wiki
+- **Lifespan** does real work: it drops the legacy `entities` table if present,
+  runs `Base.metadata.create_all`, applies additive migrations and one-time
+  backfills, then starts the APScheduler instance
+- **CORS** allows `localhost:3000` and `localhost:8000`
 
-The app is runnable via `uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload`.
+Run with `uvicorn app.main:app --port 8000`.
 
-## Route Registration
+## Routers
 
-Routes are included with the `/api` prefix:
+All routers are included under `/api`:
 
-```python
-app.include_router(auth.router, prefix="/api", tags=["auth"])
-app.include_router(memories.router, prefix="/api", tags=["memories"])
-```
+| Prefix | File | Highlights |
+|--------|------|------------|
+| `/api/auth` | `routes/auth.py` | register, login, refresh, `session-config` |
+| `/api/memories` | `routes/memories.py` | capture (text/voice/form), list, get, patch, delete, search, `{id}/related` |
+| `/api/stories` | `routes/stories.py` | generate, list, get, export |
+| `/api/timeline` | `routes/timeline.py` | chronological listing with filters |
+| `/api/insights` | `routes/insights.py` | stats, trends, word-cloud, achievements |
+| `/api/review` | `routes/review.py` | review queue and count |
+| `/api/entities` | `routes/entities.py` | list, counts, detail, merge, undo, merge-suggestions |
+| `/api/wiki` | `routes/wiki.py` | OpenWiki viewer |
 
-Currently implemented routes:
+`/health` and `/health/ollama` live on the app itself.
 
-| Prefix | File | Endpoints |
-|--------|------|-----------|
-| `/api/auth` | [`app/routes/auth.py`](../app/routes/auth.py) | register, login, refresh |
-| `/api/memories` | [`app/routes/memories.py`](../app/routes/memories.py) | capture |
+### Route ordering caveat
 
-Planned but not yet implemented: search, stories, timeline, insights.
+In `routes/entities.py`, `GET /entities/{entity_id}` is declared **last**. FastAPI
+matches in declaration order, so if it came first it would swallow
+`/entities/counts` and `/entities/merge-suggestions` by trying to parse them as
+UUIDs. Keep static paths above dynamic ones.
 
 ## Middleware Stack
 
-- **CORS** (`CORSMiddleware`): Allows frontend development on localhost:3000 to communicate with the API on localhost:8000. Credentials and all methods/headers are enabled.
+- **CORS** — only middleware. Note that when a handler raises, the error can
+  propagate past CORS and the browser reports a network failure instead of the
+  status code; the frontend API client compensates by reporting 5xx distinctly.
 
 ## Dependency Injection
 
-MEMIND uses FastAPI's `Depends` pattern for:
+- **`get_db()`** (`app/db/connection.py`) — yields an async session
+- **`get_current_user()`** (`app/dependencies.py`) — decodes the JWT and loads
+  the user; all protected routes depend on it, and every query filters by
+  `user_id`
+- **`get_unlocked_memory_ids()`** (`app/privacy.py`) — parses
+  `X-Unlocked-Memory-Ids` so read paths can redact locked memories
 
-- **Database sessions**: `get_db()` in [`app/db/connection.py`](../app/db/connection.py) yields an async SQLAlchemy session
-- **Authentication**: `get_current_user()` in [`app/dependencies.py`](../app/dependencies.py) extracts the JWT bearer token, decodes it, and loads the user from the database — see [Authentication](auth.md) for details
+## Background Jobs
 
-## Tech Stack Decisions
+`app/jobs/scheduler.py` wraps `AsyncIOScheduler`; `app/jobs/worker.py` executes
+tracked jobs. Key behaviours:
 
-| Decision | Choice | Rationale |
-|----------|--------|-----------|
-| Web framework | FastAPI | Async support, OpenAPI docs, dependency injection |
-| Data validation | Pydantic v2 | Type-safe schemas, validation, serialization |
-| Database | PostgreSQL 15+ with pgvector | Structured data + vector embeddings in one database |
-| ORM | SQLAlchemy async | Async I/O, cross-DB compatibility for tests |
-| Auth | JWT (python-jose) + bcrypt (passlib) | Stateless auth, industry-standard hashing |
-| LLM | Ollama Cloud API (primary) | Open-source models, low latency for capture/refine |
-| LLM fallback | Claude Opus (Anthropic) | Higher-quality story generation |
-| Voice | Whisper via Ollama | Speech-to-text for voice captures |
-| Deployment | Render | Managed PostgreSQL + FastAPI hosting |
+- Refinement chains into enrichment, each recorded in `job_status`
+- When the scheduler is **not** running (e.g. under `TestClient`) the job runs
+  inline instead — never both, or the two runs would race on the same row
+- User edits are carried on `job_status.overrides` and re-applied after each
+  agent stage so reprocessing cannot clobber them
+- Failure handler rolls back and re-fetches rows, so it cannot itself crash
 
-### Why pgvector over Pinecone/Weaviate
+## Migrations
 
-MEMIND intentionally uses pgvector within PostgreSQL rather than a dedicated vector database. This keeps infrastructure simple — one database for structured data, full-text search, and vector similarity — while reducing operational complexity and cost. The trade-off is that pgvector is less feature-rich for vector search at massive scale, which is acceptable for MEMIND's current scope.
+There is no migration framework. `main.py` applies **additive** changes idempotently:
 
-## Planned Agent Pipeline
+1. `_drop_legacy_entity_table()` — the Phase 1 `entities` table had an
+   incompatible shape (and 0 rows); it is salvaged into `structured_content`
+   then dropped before `create_all`
+2. `_has_column` checks add missing columns (`event_date`, `needs_review`,
+   `date_precision`, `is_private`, `entities_backfilled`, ...)
+3. One-time backfills: recover event dates for undated memories, and populate
+   entity tables from legacy JSON (`entities_backfilled` guards this)
 
-The agent pipeline is described in [Memory Pipeline](memory-pipeline.md) but not yet implemented. The architecture calls for five specialized agents:
+Because `create_all` never alters an existing table, a column rename or type
+change needs an explicit step here.
 
-1. **Capture Agent** — synchronous, structures raw input
-2. **Refinement Agent** — async, resolves ambiguities
-3. **Enrichment Agent** — async, RAG + tags + importance
-4. **Search Agent** — on-demand, natural language to structured query
-5. **Story Agent** — on-demand, Ollama-first with Claude fallback
+## Data Access Conventions
 
-Each agent is intended to run as a background job tracked in the `job_status` table. The `app/agents/` package exists but is currently empty.
+- All ids are `GUID` (UUID objects in Python, adapted per dialect). Model
+  defaults yield `uuid.uuid4`, **not** `str(...)` — mixing the two makes
+  SQLAlchemy's flush ordering compare `UUID < str` and raise
+- Sessions run with `autoflush=False`, so explicit `flush()` is needed where a
+  later query must see an earlier in-session change
+- JSON columns use `DBJSON` (JSONB on Postgres, JSON on SQLite)
+- Datetimes may be naive or aware depending on origin; normalise with
+  `app.db.datetime_utils.as_utc` before comparing
 
 ## Source Map
 
 | File | Purpose |
 |------|---------|
-| `app/main.py` | FastAPI app, CORS, lifespan, route inclusion |
-| `app/dependencies.py` | `get_current_user` dependency |
-| `app/security.py` | JWT creation/verification, password hashing |
-| `app/routes/auth.py` | Auth endpoints (register, login, refresh) |
-| `app/routes/memories.py` | Memory capture endpoint |
-| `app/routes/wiki.py` | OpenWiki viewer endpoints (`/api/wiki`) |
-| `app/db/connection.py` | Async engine and session factory |
-| `app/db/models.py` | SQLAlchemy ORM models |
-| `app/models/schemas.py` | Pydantic v2 schemas for all domains |
+| `app/main.py` | app, lifespan, migrations, router inclusion |
+| `app/dependencies.py` | `get_current_user` |
+| `app/security.py` | JWT, password hashing, session policy |
+| `app/privacy.py` | unlock header, redaction |
+| `app/db/models.py` | ORM models |
+| `app/db/entities.py` | entity resolution, merging, hierarchy, related memories |
+| `app/db/connection.py` | async engine and session factory |
+| `app/db/datetime_utils.py` | `as_utc` normalisation |
+| `app/models/schemas.py` | Pydantic v2 schemas |
+| `app/routes/` | HTTP endpoints |
+| `app/agents/` | LLM agents and embeddings |
+| `app/jobs/` | scheduler and worker |
+| `frontend/` | Next.js app |

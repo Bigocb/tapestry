@@ -1,164 +1,151 @@
 ---
 type: Reference
 title: MEMIND Data Models
-description: Pydantic schemas and SQLAlchemy ORM models for users, memories, entities, stories, search, and insights in MEMIND, including cross-database compatibility details.
-tags: [memind, data-models, pydantic, sqlalchemy, schema]
+description: SQLAlchemy ORM models and Pydantic schemas for memories, entities, stories, and jobs, including cross-database compatibility and the entity model.
+tags: [memind, data-models, pydantic, sqlalchemy, schema, entities]
 ---
 
 # Data Models
 
-MEMIND has two parallel model systems: **Pydantic schemas** for API validation and serialization, and **SQLAlchemy ORM models** for database persistence. This page covers both and explains their relationship.
+MEMIND has two model layers: **SQLAlchemy ORM models** for persistence
+([`app/db/models.py`](../app/db/models.py)) and **Pydantic schemas** for API
+validation and serialisation ([`app/models/schemas.py`](../app/models/schemas.py)).
+For the entity model in depth see [`docs/ENTITY_MODEL.md`](../docs/ENTITY_MODEL.md).
+
+## Cross-Database Compatibility
+
+Production targets PostgreSQL + pgvector; tests and local dev use SQLite. Two
+type decorators bridge the differences:
+
+- **`GUID`** — native `UUID` on Postgres, `String(36)` on SQLite. Converts to
+  string on write and back to `UUID` on read.
+- **`DBJSON`** — `JSONB` on Postgres, `JSON` on SQLite.
+
+**Id consistency rule**: model defaults return `uuid.uuid4` (a `UUID`), never
+`str(uuid4())`. A str default produces a different Python type than a loaded
+row, and SQLAlchemy's flush ordering then compares `UUID < str` and raises.
+
+Postgres-only index types (`GIN`, `ivfflat`) are declared in the ORM and are
+ignored on SQLite.
 
 ## Processing State Machine
-
-A memory transitions through these states:
 
 ```
 raw → capturing → refined → enriching → enriched → ready
 ```
 
-- `raw`: Initial state after capture — only `raw_input` and `input_type` are populated
-- `capturing`: Capture Agent is running (transient, not yet implemented)
-- `refined`: Structured content populated by Capture Agent
-- `enriching`: Enrichment Agent is running (transient, not yet implemented)
-- `enriched`: Tags, importance, and related memories added
-- `ready`: Fully processed and searchable
+| State | Meaning |
+|-------|---------|
+| `raw` | Just captured |
+| `capturing` | Capture/structuring in progress |
+| `refined` | Refinement agent has run |
+| `enriched` | Enrichment agent has run (final stage) |
 
-Currently only `raw` state is set by the capture endpoint; agent transitions are not yet implemented.
+Failed jobs set `<stage>_failed`. In practice the pipeline runs
+capture → refined → enriched.
 
-## SQLAlchemy ORM Models
-
-Defined in [`app/db/models.py`](../app/db/models.py).
-
-### Cross-Database Compatibility
-
-MEMIND supports both PostgreSQL (production) and SQLite (tests). Two custom type decorators handle the differences:
-
-- **`GUID`**: Uses PostgreSQL's native `UUID` type, falls back to `String(36)` on SQLite. UUIDs are converted to strings for SQLite storage and back to `UUID` objects on read.
-- **`DBJSON`**: Uses PostgreSQL's `JSONB` type for efficient JSON queries, falls back to standard `JSON` on SQLite.
-
-> **Known limitation**: PostgreSQL-specific index types like `GIN` (for tags) and `ivfflat` (for vector similarity) are defined in the ORM but will fail on SQLite. The `test_db_setup.py` tests that use Postgres-specific features must run against a real PostgreSQL instance.
+## ORM Models
 
 ### User
 
-| Column | Type | Notes |
-|--------|------|-------|
-| id | GUID (UUID/string) | Primary key, auto-generated |
-| username | String(255) | Unique, indexed |
-| email | String(255) | Unique, indexed |
-| password_hash | String(255) | bcrypt hash |
-| created_at | TIMESTAMP | Server default `now()` |
-| updated_at | TIMESTAMP | Server default, auto-updates |
-
-Relationships: `memories`, `entities`, `stories` (all cascade delete)
+`id`, `username` (unique), `email` (unique), `password_hash`, `created_at`,
+`updated_at`. Relationships: `memories`, `entities`, `stories` (cascade delete).
 
 ### Memory
 
 | Column | Type | Notes |
 |--------|------|-------|
-| id | GUID | Primary key |
-| user_id | GUID | FK → users.id, CASCADE |
-| raw_input | Text | Original text input |
-| input_type | String(50) | `'voice'`, `'text'`, or `'form'` |
-| structured_content | DBJSON | Serialized `StructuredMemory` Pydantic model |
-| embedding | String(3000) | Stored as JSON string; will become pgvector column |
-| tags | DBJSON | JSON array of strings |
-| mood | String(50) | Optional mood label |
-| importance_level | Integer | 1–10, default 5 |
-| processing_state | String(50) | State machine, default `'raw'` |
-| related_memory_ids | DBJSON | JSON array of UUID strings |
-| created_at | TIMESTAMP | Server default |
-| updated_at | TIMESTAMP | Server default, auto-updates |
-
-Indexes: `idx_memories_user_id`, `idx_memories_created_at` (btree), `idx_memories_tags` (GIN, Postgres only)
-
-> **Note**: The `embedding` column currently uses `String(3000)` instead of pgvector's `vector` type. The PRD calls for pgvector embeddings, but the ORM model stores embeddings as JSON strings. This will need to change to a proper `vector(1536)` column when the enrichment pipeline is implemented.
+| `id` | GUID | PK |
+| `user_id` | GUID | FK → users, CASCADE |
+| `raw_input` | Text | Original input |
+| `input_type` | String(50) | `voice` / `text` / `form` |
+| `structured_content` | DBJSON | Serialised `StructuredMemory` |
+| `embedding` | String(3000) | Serialised JSON vector (see gap below) |
+| `tags` | DBJSON | List of strings |
+| `mood` | String(50) | Optional |
+| `importance_level` | Integer | 1–10, default 5 |
+| `processing_state` | String(50) | State machine |
+| `related_memory_ids` | DBJSON | Legacy; related memories are now derived |
+| `event_date` | TIMESTAMP | When the event happened |
+| `date_precision` | String(20) | `exact` / `month` / `year` / `decade` / `range` / `unknown` |
+| `event_date_end` | TIMESTAMP | Upper bound for `range` |
+| `date_label` | String(120) | Human wording for fuzzy periods, e.g. "the 80s" |
+| `needs_review` | Boolean | Review queue flag |
+| `review_reason` | String(50) | e.g. `missing_date` |
+| `is_private` | Boolean | Privacy lock |
+| `entities_backfilled` | Boolean | One-time entity backfill marker |
+| `created_at`, `updated_at` | TIMESTAMP | |
 
 ### Entity
 
-| Column | Type | Notes |
-|--------|------|-------|
-| id | GUID | Primary key |
-| user_id | GUID | FK → users.id, CASCADE |
-| memory_id | GUID | FK → memories.id, CASCADE |
-| type | String(50) | `'person'`, `'place'`, `'date'`, `'event'`, `'concept'` |
-| value | Text | Entity text |
-| entity_metadata | DBJSON | Flexible key-value store |
-| created_at | TIMESTAMP | Server default |
+The canonical person/place/organization — one row per real thing.
+
+| Column | Notes |
+|--------|-------|
+| `kind` | `person` / `place` / `organization` |
+| `canonical_name`, `normalized_name` | Display name and matching key |
+| `attributes` | DBJSON, kind-specific |
+| `parent_entity_id` | Self-FK for containment (cafe → city) |
+| `mention_count`, `first_seen_at`, `last_seen_at` | Denormalized stats |
+| `merged_into_id` | Non-null ⇒ tombstone; every query filters these out |
+
+### EntityAlias
+
+Every spelling. Unique on `(user_id, kind, normalized_alias)`, so an alias
+resolves to exactly one entity — this is what makes exact auto-linking safe.
+`kind` participates because a person "Paris" and the place "Paris" must coexist.
+
+### MemoryEntity
+
+One mention: `memory_id`, `entity_id`, `surface_form` (as written), `role`
+(e.g. "wife"), `snippet`, `confidence`. Unique per
+`(memory_id, entity_id, surface_form)`.
+
+### EntityMerge
+
+Audit record making merges reversible: `source_entity_id`, `target_entity_id`,
+and `moved_mention_ids` / `moved_alias_ids` recording exactly what moved.
 
 ### Story
 
-| Column | Type | Notes |
-|--------|------|-------|
-| id | GUID | Primary key |
-| user_id | GUID | FK → users.id, CASCADE |
-| title | String(255) | Story title |
-| narrative | Text | Generated markdown narrative |
-| memory_ids | DBJSON | JSON array of source memory UUIDs |
-| story_type | String(50) | `'chronological'`, `'thematic'`, `'curated'`, `'digest'` |
-| created_at | TIMESTAMP | Server default |
-| updated_at | TIMESTAMP | Server default, auto-updates |
+`title`, `narrative` (markdown), `memory_ids` (DBJSON), `story_type`.
 
 ### JobStatus
 
-| Column | Type | Notes |
-|--------|------|-------|
-| id | GUID | Primary key |
-| user_id | GUID | Not a FK (no cascading) |
-| memory_id | GUID | Nullable |
-| task_type | String(50) | `'refinement'`, `'enrichment'`, `'story'` |
-| status | String(50) | `'pending'`, `'running'`, `'completed'`, `'failed'` |
-| progress | Float | 0.0–1.0 |
-| error | Text | Nullable error message |
-| created_at | TIMESTAMP | Server default |
-| updated_at | TIMESTAMP | Server default, auto-updates |
+`task_type` (`refinement` / `enrichment` / `story`), `status`, `progress`,
+`error`, and `overrides` — user edits captured at queue time, re-applied after
+each agent stage.
 
 ## Pydantic Schemas
 
-Defined in [`app/models/schemas.py`](../app/models/schemas.py). All schemas use Pydantic v2 with `Config.from_attributes = True` for ORM compatibility.
+All use Pydantic v2. Notable conventions:
 
-### Domain Schemas
+- `MemoryResponse` carries both denormalized fields and derived conveniences
+  (`title`, `summary`, `people`, `location`, `is_locked`)
+- `MemoryUpdate` sets `extra="forbid"`, so a misspelled field returns 422
+  instead of being silently dropped. This was added after the frontend sent
+  phantom `refined_text` / `importance_score` fields and lost edits silently
+- `StructuredMemory` includes `date_precision`, `event_date_end` and
+  `date_label` alongside `event_date`
+- `EntitySummary`, `EntityDetail`, `EntityMergeRequest/Response`,
+  `EntityMergeSuggestion`
+- `RelatedMemory`, `RelatedMemoriesResponse`
 
-| Schema | Domain | Purpose |
-|--------|--------|---------|
-| `UserCreate` | Auth | Registration input (username, email, password) |
-| `UserLogin` | Auth | Login input (username, password) |
-| `UserResponse` | Auth | User output (id, username, email, created_at) |
-| `TokenResponse` | Auth | JWT output (access_token, token_type) |
-| `MemoryCapture` | Memory | Capture input (raw_input, input_type) |
-| `MemoryResponse` | Memory | Full memory output with all fields |
-| `MemoryUpdate` | Memory | Partial update input |
-| `StructuredMemory` | Memory | Post-capture structure (title, summary, entities, mood, tags) |
-| `EntityData` | Entity | Entity input (type, value, metadata) |
-| `EntityResponse` | Entity | Entity output with id and timestamps |
-| `SearchQuery` | Search | Structured search (text, semantic, filters, pagination) |
-| `SearchFilters` | Search | Date range, tags, mood, importance filters |
-| `SearchResult` | Search | Single search result with relevance score |
-| `SearchResponse` | Search | Paginated search results |
-| `StoryGenerate` | Story | Story creation input (memory_ids, story_type, custom_prompt) |
-| `StoryResponse` | Story | Story output with narrative |
-| `StoryExport` | Story | Export format selection |
-| `TimelineQuery` | Timeline | Date range and filter params |
-| `MemoryStats` | Insights | Aggregated memory statistics |
-| `TrendData` | Insights | Time-series data point |
-| `MemoryTrends` | Insights | Weekly trends (memories per week, mood) |
-| `WordCloudData` | Insights | Word frequency pair |
-| `Achievement` | Insights | Badge/achievement with progress |
-| `InsightsResponse` | Insights | Full insights dashboard |
-| `JobStatusResponse` | Jobs | Async job tracking |
-| `ErrorResponse` | General | Standard error format |
+### Validation Highlights
 
-### Validation Rules
+- Username: 3–255 chars, alphanumeric + `_`/`-`
+- Password: minimum 8 characters
+- `input_type`: `voice` / `text` / `form`
+- `date_precision`: `exact` / `month` / `year` / `decade` / `range` / `unknown`
+- `story_type`: `chronological` / `thematic` / `curated` / `digest`
+- `importance_level`: 1–10
 
-- **Username**: 3–255 chars, alphanumeric + underscore/hyphen only
-- **Email**: Valid email format (Pydantic `EmailStr`)
-- **Password**: Minimum 8 characters
-- **Entity type**: Must be one of `person`, `place`, `date`, `event`, `concept`
-- **Input type**: Must be one of `voice`, `text`, `form`
-- **Story type**: Must be one of `chronological`, `thematic`, `curated`, `digest`
-- **Importance level**: 1–10, default 5
-- **Search limit**: 1–100, default 20
+## Known Gaps
 
-## ORM ↔ Schema Mapping
-
-The `MemoryResponse` schema uses `from_attributes = True` to convert SQLAlchemy ORM objects to API responses. In the capture endpoint ([`app/routes/memories.py`](../app/routes/memories.py)), the conversion is done manually field-by-field. When the agent pipeline is implemented, `StructuredMemory` will be serialized into the ORM's `structured_content` JSONB column and deserialized back on read.
+- **Embeddings** are serialised JSON in a `String(3000)` column, and similarity
+  is computed in Python. A pgvector `vector` column with an ANN index is the
+  intended production shape.
+- **`related_memory_ids`** on `Memory` is legacy. Related memories are now
+  derived on read from shared entities (see
+  [`find_related_memories`](../app/db/entities.py)), which works retroactively
+  and cannot go stale.

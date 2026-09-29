@@ -1,125 +1,114 @@
 ---
 type: Reference
 title: MEMIND Testing
-description: Test strategy, fixtures, known limitations, and how to run tests for the MEMIND platform, including SQLite vs PostgreSQL compatibility notes.
+description: Test strategy, fixtures, patterns, and known limitations for MEMIND, including SQLite vs PostgreSQL compatibility notes.
 tags: [memind, testing, pytest, sqlite, postgresql]
 ---
 
 # Testing
 
-MEMIND uses **pytest** with **pytest-asyncio** for async test support. Tests run against an in-memory SQLite database by default, which enables fast, isolated test runs without requiring a running PostgreSQL instance.
+MEMIND uses **pytest** with **pytest-asyncio**. Tests run against an in-memory
+SQLite database, so the suite needs no running PostgreSQL and takes about three
+minutes end to end.
 
 ## Running Tests
 
 ```bash
-# Run all tests
-pytest -v
-
-# Run specific test files
-pytest tests/test_auth.py -v
-pytest tests/test_memory_capture.py -v
-pytest tests/test_pydantic_models.py -v
-
-# Run database setup tests (requires PostgreSQL)
-pytest tests/test_db_setup.py -v
+pytest -q                      # whole suite
+pytest tests/test_entity_model.py -v
 ```
 
-## Test Configuration
+Expected result: **365 tests collected, all passing, 1 skipped** (the pgvector
+test, which is PostgreSQL-only). The suite runs in roughly three minutes.
 
-[`pytest.ini`](../pytest.ini) configures:
+## Configuration
 
-- `asyncio_mode = auto` — all async tests are auto-detected
+[`pytest.ini`](../pytest.ini):
+
+- `asyncio_mode = auto`
 - `testpaths = tests`
 - `pythonpath = .`
 
-[`tests/conftest.py`](../tests/conftest.py) sets `DATABASE_URL` to `sqlite+aiosqlite:///:memory:` before any imports, overriding the default PostgreSQL connection.
+[`tests/conftest.py`](../tests/conftest.py) sets `DATABASE_URL` to SQLite
+in-memory before imports, and — importantly — **tracks every async engine**
+created during the session and disposes it at teardown.
+
+> Without that disposal the suite *passes* but never exits: `aiosqlite` runs each
+> connection on a non-daemon worker thread, so the interpreter waits on it at
+> shutdown. If pytest ever appears to hang after printing results, that is why.
 
 ## Test Files
 
-| File | What it tests | Count |
-|------|---------------|-------|
-| [`test_fastapi_app.py`](../tests/test_fastapi_app.py) | App creation, health check, OpenAPI docs, CORS, 404 handling | ~6 tests |
-| [`test_auth.py`](../tests/test_auth.py) | Registration, login, token refresh, protected routes, user isolation | ~20 tests |
-| [`test_memory_capture.py`](../tests/test_memory_capture.py) | Memory capture CRUD, input validation, user isolation, state initialization | Multiple tests |
-| [`test_pydantic_models.py`](../tests/test_pydantic_models.py) | Schema validation for all Pydantic models | Many tests |
-| [`test_db_setup.py`](../tests/test_db_setup.py) | Database connection, pgvector extension, schema creation, embeddings | Postgres-only |
+| Area | Files |
+|------|-------|
+| App & models | `test_fastapi_app.py`, `test_pydantic_models.py` (36) |
+| Auth & session | `test_auth.py` (26) |
+| Memory lifecycle | `test_memory_capture.py`, `test_memory_retrieval.py`, `test_memory_update.py`, `test_memory_delete.py` |
+| Agents | `test_capture_agent.py` (20), `test_refinement_agent.py`, `test_enrichment_agent.py`, `test_story_agent.py`, `test_search_agent.py`, `test_embeddings.py` |
+| Dates | `test_fuzzy_dates.py` (24) |
+| Entities | `test_entity_model.py` (22), `test_entity_write_path.py`, `test_entity_read.py`, `test_entity_merge.py`, `test_entity_hierarchy.py` |
+| Related memories | `test_related_memories.py` (16) |
+| Privacy & review | `test_privacy_lock.py`, `test_review_queue.py` |
+| Search, stories, insights, timeline | `test_hybrid_search.py`, `test_search_natural.py`, `test_stories.py`, `test_insights.py`, `test_timeline.py` |
+| Jobs & wiki | `test_scheduler.py`, `test_wiki_routes.py`, `test_db_setup.py` |
 
-## SQLite vs PostgreSQL Compatibility
+## Fixtures
 
-MEMIND's ORM uses custom type decorators ([`DBJSON`](../app/db/models.py) and [`GUID`](../app/db/models.py)) to handle differences between PostgreSQL and SQLite:
-
-- **JSON/JSONB**: `DBJSON` uses `JSONB` on PostgreSQL, `JSON` on SQLite
-- **UUID**: `GUID` uses native `UUID` on PostgreSQL, `String(36)` on SQLite
-
-### Known PostgreSQL-Only Features
-
-Some ORM features are PostgreSQL-specific and **will fail on SQLite**:
-
-| Feature | Postgres Type | SQLite Fallback |
-|---------|-------------|-----------------|
-| Tag indexing | `GIN` index | Not supported |
-| Vector similarity | `ivfflat` index on `vector` column | Not supported |
-| `ARRAY` type | Native `ARRAY` | Not used in ORM (uses JSON instead) |
-| `gen_random_uuid()` | Native function | Uses Python `uuid4()` |
-
-The `test_db_setup.py` file tests PostgreSQL-specific features (pgvector, embeddings, GIN indexes) and requires a running PostgreSQL instance with pgvector enabled. These tests should be skipped or configured separately when running the main test suite against SQLite.
-
-## Test Fixtures
-
-Most test files create their own in-memory database fixtures:
+Each test module builds its own in-memory database and a `TestClient` with
+`get_db` overridden. Common shape:
 
 ```python
-TEST_DATABASE_URL = "sqlite+aiosqlite:///:memory:"
-
 @pytest.fixture
 async def test_db():
-    engine = create_async_engine(TEST_DATABASE_URL, echo=False)
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-    AsyncSessionLocal = sessionmaker(engine, class_=AsyncSession, ...)
-    async with AsyncSessionLocal() as session:
+    SessionLocal = sessionmaker(engine, class_=AsyncSession,
+                                expire_on_commit=False, autoflush=False)
+    async with SessionLocal() as session:
         yield session
 ```
 
-The `test_db` fixture creates fresh tables for each test session. Tests that need an authenticated user create a test user directly via the ORM and generate a JWT token via `create_access_token()`.
+Tests needing a token either register/login through the API or mint one with
+`create_access_token`.
 
-## Key Test Patterns
-
-### Testing Authenticated Endpoints
-
-```python
-# Create user and get token
-user = User(id=str(uuid4()), username="testuser", ...)
-token = create_access_token(user_id=str(user.id), username=user.username)
-headers = {"Authorization": f"Bearer {token}"}
-
-# Make authenticated request
-response = client.post("/api/memories/capture", json={...}, headers=headers)
-```
-
-### Testing Schema Validation
-
-Pydantic model tests verify field constraints directly:
+For tests that exercise the background pipeline, the scheduler's session factory
+must be pointed at the test database:
 
 ```python
-with pytest.raises(ValidationError) as exc_info:
-    UserCreate(username="ab", email="test@example.com", password="pass123")
-assert "at least 3 characters" in str(exc_info.value)
+from app.jobs import scheduler as scheduler_module
+scheduler_module.BackgroundSessionLocal = factory
 ```
 
-## Dependencies
+## SQLite vs PostgreSQL
 
-Key test dependencies from [`requirements.txt`](../requirements.txt):
+`DBJSON` and `GUID` type decorators bridge the dialects. PostgreSQL-only pieces
+(`GIN` tag index, `ivfflat`, `information_schema` queries) are declared but do
+not work on SQLite, which is why `test_db_setup.py` is largely skipped.
 
-- `pytest==7.4.3`
-- `pytest-asyncio==0.21.1`
-- `httpx==0.25.1` (for FastAPI `TestClient`)
-- `aiosqlite` (implicit via SQLAlchemy async SQLite)
+**Id typing**: model defaults return `UUID` objects, never `str`. Mixing the two
+makes SQLAlchemy's flush ordering compare `UUID < str` and raise. There is a
+regression test guarding this (`TestIdTypeConsistency`).
 
-## What Is Not Tested
+## Patterns Worth Reusing
 
-- Agent pipeline (not yet implemented)
-- Voice transcription endpoint
-- Search, story, timeline, and insights routes (not yet implemented)
-- End-to-end integration tests with PostgreSQL
-- Token expiration behavior in production
+**Prove a guard is real.** Several privacy and filtering tests were verified by
+temporarily disabling the filter and confirming the test fails. A test that
+passes either way is not protecting anything.
+
+**Assert on observable behaviour.** Entity tests check mention counts and which
+names resolve, not internal call shapes.
+
+**Seed through the service.** Entity tests call `sync_memory_entities` rather
+than inserting rows directly, so they exercise the same path production uses.
+
+## Known Limitations
+
+- **Agent output is not asserted against a live model.** Agents are stubbed or
+  monkeypatched, so prompts and parsing are tested but real model quality is not
+- **PostgreSQL path is unexercised.** pgvector similarity and `tsquery` search
+  are not covered because the suite runs on SQLite
+- **No end-to-end browser tests.** The frontend has typecheck and lint only
+- **Voice transcription** is untested because it returns 501
+- **Concurrency** (two jobs racing the same memory) is designed against but not
+  load-tested

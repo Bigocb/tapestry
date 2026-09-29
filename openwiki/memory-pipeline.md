@@ -1,125 +1,115 @@
 ---
 type: Workflow
 title: MEMIND Memory Pipeline
-description: How memories flow through capture, refinement, enrichment, and story generation in MEMIND, including the processing state machine and planned agent architecture.
-tags: [memind, pipeline, memory, agents, rag, enrichment]
+description: How memories flow from capture through refinement and enrichment, how dates and entities are extracted, and how related memories are derived.
+tags: [memind, pipeline, memory, agents, entities, dates]
 ---
 
 # Memory Pipeline
 
-The memory pipeline is MEMIND's core workflow: from raw user input to a fully enriched, searchable memory. The pipeline has both a **synchronous path** (instant feedback) and an **asynchronous path** (background agent processing).
+From raw input to a fully enriched, searchable memory. There is a synchronous
+path (instant feedback) and an asynchronous path (background agents).
 
-## Current State
+## Capture Flow
 
-Only the **capture endpoint** is implemented. The asynchronous agent pipeline is planned but not yet built. The `app/agents/` package exists but is empty.
+Endpoints: `POST /api/memories/capture/{text,voice,form}` in
+[`app/routes/memories.py`](../app/routes/memories.py).
 
-## Processing State Machine
+1. Authenticate via `get_current_user`
+2. Create the `Memory` row
+3. Run the **Capture Agent** (`structure_memory`) synchronously and store the result
+4. Sync first-class entities from the structured content
+5. Schedule refinement + enrichment via APScheduler
+6. Return immediately
 
-Each memory transitions through these states:
+Voice captures first go through `_transcribe_audio`, which currently raises
+501 — no transcription backend is wired.
+
+## Agents
+
+| Agent | File | Timing | Role |
+|-------|------|--------|------|
+| Capture | `agents/capture.py` | synchronous | raw text → `StructuredMemory` |
+| Refinement | `agents/refinement.py` | async | resolve ambiguities, normalise entities |
+| Enrichment | `agents/enrichment.py` | async | tags, importance, connections |
+| Embeddings | `agents/embeddings.py` | async | vectors for semantic search |
+| Search | `agents/search.py` | on demand | natural language → `SearchQuery` |
+| Story | `agents/story.py` | on demand | memories → markdown narrative |
+
+All are Ollama-first. Only the Story agent implements the Claude fallback
+(gated on a response-quality check). Every agent falls back to a deterministic
+result rather than raising, so the pipeline never stalls on a model failure.
+
+### Date resolution
+
+`capture.resolve_date()` returns a `ResolvedDate` carrying both a representative
+date and how precise it actually is. Order matters: **fuzzy periods are checked
+first** so "1987 to 1990" is preserved as a range rather than collapsed to 1987.
+
+Handled forms include explicit dates, relative phrases, weekdays, seasons,
+holidays, month/year, bare years, decades with early/mid/late qualifiers, and
+explicit year ranges.
+
+A fuzzy period is a real answer, not a missing one, so it is **not** sent to the
+review queue.
+
+### Entity extraction
+
+`capture` asks the model for `person` / `place` / `organization` entities, with
+`metadata.relation` for people (e.g. "wife") and `metadata.parent` for places
+contained in other places.
+
+`sync_memory_entities()` is the single entry point for every stage that writes
+`structured_content`. Because reprocessing rewrites content wholesale, it
+**replaces** a memory's mentions rather than only adding: entities no longer
+present are detached and counts are recomputed. Entities themselves are never
+deleted — their `mention_count` simply drops.
+
+## Processing States
 
 ```
-raw → capturing → refined → enriching → enriched → ready
+raw → capturing → refined → enriched
 ```
 
-| State | Meaning | Who sets it |
-|-------|---------|-------------|
-| `raw` | Just captured, no processing yet | Capture endpoint |
-| `capturing` | Capture Agent is structuring the raw input | Capture Agent (planned) |
-| `refined` | Structured content is populated | Refinement Agent (planned) |
-| `enriching` | Enrichment Agent is adding context | Enrichment Agent (planned) |
-| `enriched` | Tags, importance, related memories added | Enrichment Agent (planned) |
-| `ready` | Fully processed, searchable | Background job completion (planned) |
+`JobStatus` records each stage. Failures set `<stage>_failed` without breaking
+the capture response. When the scheduler is not running (tests), jobs execute
+inline — never both, or two concurrent runs would race on the same memory.
 
-Currently, the capture endpoint creates memories in the `raw` state and no further transitions happen.
+## Editing and Reprocessing
 
-## Capture Flow (Implemented)
+`PATCH /api/memories/{id}`:
 
-`POST /api/memories/capture` — [`app/routes/memories.py`](../app/routes/memories.py)
+- Changing `raw_input` requeues refinement + enrichment, because everything
+  derived from the text is now stale
+- Editing only metadata does **not** requeue
+- Any field set in the same request is stored as an `override` on the job and
+  re-applied after each agent stage, so your corrections survive the rerun
 
-1. Requires authenticated user via [Authentication](auth.md) dependency
-2. Accepts `MemoryCapture` schema: `raw_input` (text) and `input_type` (`voice`, `text`, or `form`)
-3. Creates a `Memory` record with `processing_state="raw"`, empty tags and related_memory_ids
-4. Returns `MemoryResponse` immediately — user sees their raw capture right away
-5. Planned: schedule background refinement job (not yet implemented)
+## Review Queue
 
-The synchronous design ensures no user-facing latency regardless of how long background processing takes.
+A memory with no time information cannot be placed on the timeline, so it is
+flagged `needs_review` with reason `missing_date` and listed at `/review`.
+Setting a date, or any fuzzy period label, clears the flag.
 
-## Planned Agent Pipeline
+## Related Memories
 
-### Capture Agent (Synchronous, ~1s)
+Related memories are **derived on read** (`find_related_memories`), not stored:
+memories sharing first-class entities, ranked by number of shared entities then
+recency, returned with the shared entity names so the relationship is
+explainable.
 
-- **Input**: Raw text (transcribed voice, pasted text, or form data)
-- **Output**: `StructuredMemory` with title, summary, entities, mood, initial_tags
-- **Trigger**: Immediately after capture
-- **Status**: Not implemented. The PRD specifies this should run as part of the capture response.
+This replaced the stored `related_memory_ids`, which stayed empty because the
+enrichment agent depended on embeddings that older memories never received.
+Derived relations work retroactively and cannot go stale.
 
-### Refinement Agent (Async, ~2–3s)
+## Privacy
 
-- **Input**: Structured memory + similar past memories from database
-- **Output**: Refined memory with resolved references, normalized entities
-- **Example**: "that meeting" → "Q3 Planning meeting on July 15"
-- **Trigger**: Scheduled after capture completes
-- **Status**: Not implemented
+A private memory is redacted in every response unless its id appears in the
+`X-Unlocked-Memory-Ids` header. The unlock is session-scoped and never
+persisted, so a refresh re-locks. Locked memories are excluded from search
+scoring, insights aggregates, entity lists/counts, and related-memory results.
 
-### Enrichment Agent (Async, ~3–5s)
+## Further Reading
 
-- **Input**: Refined memory + vector embedding
-- **Process**:
-  1. Generate embedding via Ollama embeddings model
-  2. Query pgvector for top-5 semantically similar memories (RAG)
-  3. Suggest tags, importance level, thematic connections
-- **Output**: Tags, related_memory_ids, importance_level, connection notes
-- **Trigger**: Scheduled after refinement completes
-- **Status**: Not implemented
-
-### Search Agent (On-Demand)
-
-- **Input**: Natural language user query
-- **Output**: Structured `SearchQuery` object (text terms, semantic query, filters)
-- **Example**: "Tell me about my manager chats in Q1" → `{text: "manager", filters: {date_range: Q1}}`
-- **Status**: Not implemented
-
-### Story Agent (On-Demand)
-
-- **Input**: Selected memories + story_type + optional custom prompt
-- **Output**: Markdown narrative
-- **Story types**: chronological, thematic, curated, digest
-- **Fallback**: Claude Opus if Ollama quality is insufficient
-- **Status**: Not implemented
-
-## Job Tracking
-
-The `JobStatus` ORM model ([`app/db/models.py`](../app/db/models.py)) tracks background processing:
-
-| Field | Values |
-|-------|--------|
-| task_type | `refinement`, `enrichment`, `story` |
-| status | `pending`, `running`, `completed`, `failed` |
-| progress | 0.0–1.0 |
-
-This table is defined but not yet used by any route or agent code.
-
-## Enrichment Ideas
-
-[`ENRICHMENT_IDEAS.md`](../ENRICHMENT_IDEAS.md) documents brainstormed enrichment sources beyond the core pipeline:
-
-- **Location**: GPS, reverse geocoding, weather at time of memory
-- **Temporal**: Calendar integration, holidays, moon phases
-- **News**: What was happening in the world when the memory was created
-- **Music/Media**: Spotify listening history, movie releases
-- **Health**: Fitness tracker data, sleep quality, mood correlations
-- **Social**: Entity frequency, relationship patterns, contact patterns
-
-These are exploratory ideas documented for future consideration, not currently implemented or planned in any issue.
-
-## Key Source Files
-
-| File | Role |
-|------|------|
-| `app/routes/memories.py` | Capture endpoint — the only implemented pipeline step |
-| `app/models/schemas.py` | `MemoryCapture`, `MemoryResponse`, `MemoryUpdate`, `StructuredMemory` |
-| `app/db/models.py` | `Memory` and `JobStatus` ORM models |
-| `app/agents/__init__.py` | Empty — agents will go here |
-| `ENRICHMENT_IDEAS.md` | Brainstormed enrichment data sources |
-| `ISSUES.md` | Issues 5–9 define the agent pipeline |
-| `ARCHITECTURE.md` | Full pipeline specification in the PRD section |
+- [`docs/ENTITY_MODEL.md`](../docs/ENTITY_MODEL.md) — entity model design
+- [`ENRICHMENT_IDEAS.md`](../ENRICHMENT_IDEAS.md) — brainstormed enrichment sources
