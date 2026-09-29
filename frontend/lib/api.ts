@@ -270,4 +270,14 @@ export const api = {
   getReviewQueue: (limit = 50, offset = 0) =>
     request("GET", "/review", undefined, { limit, offset }),
   getReviewCount: () => request("GET", "/review/count"),
+
+  getEntities: (kind?: string, limit = 50, offset = 0) =>
+    request("GET", "/entities", undefined, { kind, limit, offset }),
+  getEntityCounts: () => request("GET", "/entities/counts"),
+  getEntity: (id: string) => request("GET", `/entities/${id}`),
+  getMergeSuggestions: () => request("GET", "/entities/merge-suggestions"),
+  mergeEntities: (source_id: string, target_id: string) =>
+    request("POST", "/entities/merge", { source_id, target_id }),
+  undoEntityMerge: (mergeId: string) =>
+    request("POST", `/entities/merge/${mergeId}/undo`, {}),
 };

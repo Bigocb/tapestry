@@ -12,6 +12,8 @@ import {
   BookOpenIcon,
   ChartBarIcon,
   InboxIcon,
+  UsersIcon,
+  MapPinIcon,
 } from "@heroicons/react/24/outline";
 
 export function Layout({ children }: { children: React.ReactNode }) {
@@ -54,6 +56,12 @@ export function Layout({ children }: { children: React.ReactNode }) {
               </NavLink>
               <NavLink href="/timeline" icon={<ClockIcon className="w-4 h-4" />}>
                 Timeline
+              </NavLink>
+              <NavLink href="/people" icon={<UsersIcon className="w-4 h-4" />}>
+                People
+              </NavLink>
+              <NavLink href="/places" icon={<MapPinIcon className="w-4 h-4" />}>
+                Places
               </NavLink>
               <NavLink href="/stories" icon={<BookOpenIcon className="w-4 h-4" />}>
                 Stories
