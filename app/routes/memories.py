@@ -42,6 +42,7 @@ from app.models.schemas import (
 )
 from app.dependencies import get_current_user
 from app.privacy import LOCKED_SUMMARY, LOCKED_TITLE, get_unlocked_memory_ids, is_locked
+from app.db.entities import entity_ids_for_memory, recompute_entity_stats
 
 router = APIRouter()
 
@@ -246,7 +247,6 @@ async def _create_memory(
 ) -> Memory:
     """Create and persist a Memory record with state='raw'."""
     memory = Memory(
-        id=str(uuid.uuid4()),
         user_id=user.id,
         raw_input=raw_input,
         input_type=input_type,
@@ -931,6 +931,15 @@ async def delete_memory(
             detail="Memory not found",
         )
 
+    # Capture the entities this memory mentions before deletion, so their
+    # cached mention counts can be corrected afterwards. Deleting the memory
+    # cascades the mention rows, which would otherwise leave counts inflated.
+    affected_entity_ids = await entity_ids_for_memory(db, str(memory.id))
+
     await db.delete(memory)
     await db.commit()
+
+    if affected_entity_ids:
+        await recompute_entity_stats(db, affected_entity_ids)
+        await db.commit()
 

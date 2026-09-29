@@ -18,12 +18,93 @@ from app.db import Base, engine
 from app.agents.capture import _ollama_config, _extract_event_date
 
 import httpx
+import json
 
 
 def _has_column(conn, table_name: str, column_name: str) -> bool:
     """Check whether a column exists on the given table."""
     columns = [c["name"] for c in inspect(conn).get_columns(table_name)]
     return column_name in columns
+
+
+def _has_table(conn, table_name: str) -> bool:
+    """Check whether a table exists."""
+    return table_name in inspect(conn).get_table_names()
+
+
+async def _drop_legacy_entity_table() -> None:
+    """Drop the pre-entity-model ``entities`` table so it can be rebuilt.
+
+    The Phase 1 table had a completely different shape (a bare
+    ``memory_id``/``type``/``value`` triple) and was never populated. The
+    first-class entity model replaces it with ``entities`` + ``entity_aliases``
+    + ``memory_entities``, which CREATE TABLE cannot express as an ALTER.
+
+    This runs *before* ``create_all`` and is safe because the old table holds
+    no data; anything found is migrated into ``structured_content`` first.
+    """
+    async with engine.begin() as conn:
+        if not await conn.run_sync(_has_table, "entities"):
+            return
+        # The legacy table is identified by its `memory_id` column; the new
+        # one has no such column.
+        if not await conn.run_sync(_has_column, "entities", "memory_id"):
+            return
+
+        result = await conn.execute(text("SELECT COUNT(*) FROM entities"))
+        legacy_rows = int(result.scalar_one())
+        print(f"Found legacy entities table with {legacy_rows} rows; rebuilding.")
+
+        # Preserve anything that was stored: copy values into the owning
+        # memory's structured_content so the normal backfill can pick them up.
+        if legacy_rows:
+            rows = (
+                await conn.execute(
+                    text(
+                        "SELECT id, memory_id, type, value, entity_metadata "
+                        "FROM entities"
+                    )
+                )
+            ).fetchall()
+            for _row_id, memory_id, entity_type, value, metadata in rows:
+                memory = (
+                    await conn.execute(
+                        text("SELECT structured_content FROM memories WHERE id = :i"),
+                        {"i": memory_id},
+                    )
+                ).scalar_one_or_none()
+                if memory is None:
+                    continue
+
+                try:
+                    content = json.loads(memory) if isinstance(memory, str) else memory
+                except (TypeError, ValueError):
+                    content = {}
+                if not isinstance(content, dict):
+                    content = {}
+
+                entities = content.get("entities")
+                if not isinstance(entities, list):
+                    entities = []
+                entities.append(
+                    {
+                        "type": entity_type,
+                        "value": value,
+                        "metadata": (
+                            json.loads(metadata)
+                            if isinstance(metadata, str)
+                            else metadata
+                        ),
+                    }
+                )
+                content["entities"] = entities
+                await conn.execute(
+                    text("UPDATE memories SET structured_content = :c WHERE id = :i"),
+                    {"c": json.dumps(content), "i": memory_id},
+                )
+
+        await conn.execute(text("DROP TABLE entities"))
+        print("Dropped legacy entities table.")
 
 
 async def _apply_pending_migrations() -> None:
@@ -105,6 +186,86 @@ async def _apply_pending_migrations() -> None:
                 f"Backfilled undated memories: {recovered} dated, {flagged} queued for review."
             )
 
+    # Backfill first-class entities from the JSON still stored in
+    # structured_content, then record that it has been done.
+    async with engine.begin() as conn:
+        if not await conn.run_sync(_has_column, "memories", "entities_backfilled"):
+            await conn.execute(
+                text(
+                    "ALTER TABLE memories ADD COLUMN entities_backfilled "
+                    "BOOLEAN DEFAULT FALSE"
+                )
+            )
+            print("Added missing entities_backfilled column to memories table.")
+    await _backfill_entities()
+
+
+async def _backfill_entities() -> None:
+    """Populate entity tables from legacy structured_content JSON.
+
+    Runs once per memory (guarded by ``memories.entities_backfilled``), using
+    the same matching rules as live capture so aliases collapse consistently.
+    """
+    from app.db.entities import apply_mentions
+    from app.db import AsyncSessionLocal
+
+    async with AsyncSessionLocal() as session:
+        pending = (
+            await session.execute(
+                text(
+                    "SELECT id, user_id, structured_content FROM memories "
+                    "WHERE COALESCE(entities_backfilled, 0) = 0"
+                )
+            )
+        ).fetchall()
+
+        if not pending:
+            return
+
+        created = 0
+        for memory_id, user_id, raw_content in pending:
+            try:
+                content = (
+                    json.loads(raw_content)
+                    if isinstance(raw_content, str)
+                    else raw_content
+                )
+            except (TypeError, ValueError):
+                content = {}
+            if not isinstance(content, dict):
+                content = {}
+
+            mentions = []
+            for item in content.get("entities") or []:
+                if not isinstance(item, dict):
+                    continue
+                kind = item.get("type")
+                value = item.get("value")
+                if kind not in ("person", "place", "organization") or not value:
+                    continue
+                metadata = item.get("metadata")
+                role = None
+                if isinstance(metadata, dict):
+                    role = metadata.get("relation") or metadata.get("role")
+                mentions.append((kind, str(value), role))
+
+            if mentions:
+                await apply_mentions(
+                    session, str(user_id), str(memory_id), mentions
+                )
+                created += len(mentions)
+
+            await session.execute(
+                text(
+                    "UPDATE memories SET entities_backfilled = TRUE WHERE id = :i"
+                ),
+                {"i": memory_id},
+            )
+
+        await session.commit()
+        if created:
+            print(f"Backfilled {created} entity mentions from structured_content.")
+
 tags_metadata = [
     {
         "name": "health",
@@ -142,6 +303,9 @@ async def lifespan(app: FastAPI):
     """Application lifespan events (startup/shutdown)."""
     # Startup
     print("MEMIND application starting...")
+    # Must run before create_all: the legacy entities table cannot be migrated
+    # in place, only dropped and recreated with the new shape.
+    await _drop_legacy_entity_table()
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     await _apply_pending_migrations()

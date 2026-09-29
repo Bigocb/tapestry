@@ -1,5 +1,15 @@
 from .connection import engine, AsyncSessionLocal, get_db
-from .models import Base, User, Memory, Entity, Story, JobStatus
+from .models import (
+    Base,
+    User,
+    Memory,
+    Entity,
+    EntityAlias,
+    MemoryEntity,
+    EntityMerge,
+    Story,
+    JobStatus,
+)
 from .datetime_utils import as_utc
 
 __all__ = [
@@ -10,6 +20,9 @@ __all__ = [
     "User",
     "Memory",
     "Entity",
+    "EntityAlias",
+    "MemoryEntity",
+    "EntityMerge",
     "Story",
     "JobStatus",
     "as_utc",

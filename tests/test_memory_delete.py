@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker
 
 from app.main import app
-from app.db import Base, User, Memory, Entity, get_db
+from app.db import Base, User, Memory, Entity, MemoryEntity, get_db
 from app.security import hash_password
 
 
@@ -90,17 +90,14 @@ async def _seed_memory(session, user_id, raw_input):
     return memory
 
 
-async def _seed_entity(session, user_id, memory_id, value):
-    entity = Entity(
-        user_id=user_id,
-        memory_id=memory_id,
-        type="person",
-        value=value,
+async def _seed_mention(session, user_id, memory_id, value):
+    """Attach a person mention to a memory via the entity service."""
+    from app.db.entities import apply_mentions
+
+    entities = await apply_mentions(
+        session, user_id, memory_id, [("person", value, None)]
     )
-    session.add(entity)
-    await session.commit()
-    await session.refresh(entity)
-    return entity
+    return entities[0]
 
 
 class TestMemoryDelete:
@@ -113,7 +110,8 @@ class TestMemoryDelete:
         user1, _ = await setup_users()
         token = get_auth_token("alice", "password123")
         memory = await _seed_memory(test_db, str(user1.id), "memory to delete")
-        entity = await _seed_entity(test_db, str(user1.id), str(memory.id), "Sarah")
+        entity = await _seed_mention(test_db, str(user1.id), str(memory.id), "Sarah")
+        await test_db.commit()
 
         response = client.delete(
             f"/api/memories/{memory.id}",
@@ -122,12 +120,20 @@ class TestMemoryDelete:
 
         assert response.status_code == 204
 
-        # Verify memory and entity are gone.
+        # The memory is gone.
         mem_result = await test_db.execute(select(Memory).where(Memory.id == memory.id))
         assert mem_result.scalar_one_or_none() is None
 
-        ent_result = await test_db.execute(select(Entity).where(Entity.id == entity.id))
-        assert ent_result.scalar_one_or_none() is None
+        # The mention cascaded away...
+        mention_result = await test_db.execute(
+            select(MemoryEntity).where(MemoryEntity.memory_id == memory.id)
+        )
+        assert mention_result.scalars().all() == []
+
+        # ...and the entity's cached mention count was corrected to zero
+        # rather than left stale at 1.
+        await test_db.refresh(entity)
+        assert entity.mention_count == 0
 
     @pytest.mark.asyncio
     async def test_delete_memory_returns_404_for_other_user(

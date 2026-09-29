@@ -54,9 +54,10 @@ async def register(user_create: UserCreate, db: AsyncSession = Depends(get_db)):
             status_code=status.HTTP_400_BAD_REQUEST, detail="Email already registered"
         )
 
-    # Create new user
+    # Create new user. The id default is a UUID object, which the GUID column
+    # type adapts per-dialect; assigning a str here would make this row's id
+    # a different Python type than a loaded one.
     user = User(
-        id=str(uuid4()),  # Convert to string for cross-DB compatibility
         username=user_create.username,
         email=user_create.email,
         password_hash=hash_password(user_create.password),
