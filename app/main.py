@@ -30,6 +30,21 @@ import httpx
 import json
 
 
+# A memory that is queued for review but does in fact carry a time signal: an
+# exact date, a fuzzy precision (decade/range) or a human label. Used to heal
+# rows that were queued before fuzzy periods counted as real answers.
+#
+# The boolean is a bound parameter on purpose: `needs_review = 1` is accepted
+# by SQLite but rejected by Postgres, which refuses boolean-to-integer
+# comparison.
+MEMORIES_WITH_TIME_SIGNAL = (
+    "needs_review = :queued "
+    "AND (event_date IS NOT NULL "
+    "     OR date_precision IN ('decade', 'range') "
+    "     OR date_label IS NOT NULL AND date_label <> '')"
+)
+
+
 def _has_column(conn, table_name: str, column_name: str) -> bool:
     """Check whether a column exists on the given table."""
     columns = [c["name"] for c in inspect(conn).get_columns(table_name)]
@@ -200,24 +215,17 @@ async def _apply_pending_migrations() -> None:
         # a label, a decade or a range. Only a PATCH re-evaluated the flag, so
         # reviewed-and-set memories silently stayed in the queue. Heal them.
         reconcile = await conn.execute(
-            text(
-                "SELECT COUNT(*) FROM memories "
-                "WHERE needs_review = 1 "
-                "AND (event_date IS NOT NULL "
-                "     OR date_precision IN ('decade', 'range') "
-                "     OR date_label IS NOT NULL AND date_label <> '')"
-            )
+            text(f"SELECT COUNT(*) FROM memories WHERE {MEMORIES_WITH_TIME_SIGNAL}"),
+            {"queued": True},
         )
         stale = int(reconcile.scalar_one())
         if stale:
             await conn.execute(
                 text(
-                    "UPDATE memories SET needs_review = 0, review_reason = NULL "
-                    "WHERE needs_review = 1 "
-                    "AND (event_date IS NOT NULL "
-                    "     OR date_precision IN ('decade', 'range') "
-                    "     OR date_label IS NOT NULL AND date_label <> '')"
-                )
+                    "UPDATE memories SET needs_review = :clear, review_reason = NULL "
+                    f"WHERE {MEMORIES_WITH_TIME_SIGNAL}"
+                ),
+                {"clear": False, "queued": True},
             )
             print(
                 f"Reconciled review flags: {stale} memories with a time signal "
@@ -328,9 +336,13 @@ async def _backfill_entities() -> None:
         pending = (
             await session.execute(
                 text(
+                    # `COALESCE(boolean, 0)` is a SQLite-ism that Postgres
+                    # refuses; NULL covers rows predating the column.
                     "SELECT id, user_id, structured_content FROM memories "
-                    "WHERE COALESCE(entities_backfilled, 0) = 0"
-                )
+                    "WHERE entities_backfilled IS NULL "
+                    "   OR entities_backfilled = :not_done"
+                ),
+                {"not_done": False},
             )
         ).fetchall()
 

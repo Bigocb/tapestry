@@ -108,10 +108,13 @@ class Memory(Base):
     # Structured Content (Pydantic model serialized to JSON/JSONB)
     structured_content = Column(STRUCTURED_CONTENT_TYPE, nullable=True)
 
-    # Embedding for semantic search (pgvector)
-    embedding = Column(
-        String(3000), nullable=True
-    )  # Store as JSON string: can be NULL until enriched
+    # Embedding for semantic search, serialized to a JSON string by
+    # ``serialize_embedding``. NULL until enriched.
+    #
+    # This must stay unbounded: a 1024-dimension vector serialises to roughly
+    # 8.6 kB. It used to be VARCHAR(3000), which SQLite never enforced, so the
+    # overflow only surfaced once the data moved to Postgres.
+    embedding = Column(Text, nullable=True)
 
     # Metadata
     # Note: Use DBJSON for cross-database compatibility
