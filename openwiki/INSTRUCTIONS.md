@@ -20,7 +20,9 @@ Document the following aspects accurately and concisely:
   PostgreSQL/pgvector for production. Note the `GUID`/`DBJSON` type decorators
   and the rule that ids are `UUID` objects, never `str`.
 - Memory capture pipeline: text, voice, form inputs, async refinement/enrichment,
-  search, and story generation. Voice transcription is a 501 stub.
+  search, and story generation. Voice is transcribed **locally** with
+  `faster-whisper` (model cached, decoded off the event loop, bytes spooled to
+  a temp file); `WHISPER_MODEL` configures the size.
 - **First-class entities** (people, places, organizations): `entities`,
   `entity_aliases`, `memory_entities`, `entity_merges`. Exact-name auto-linking,
   reversible merges, place containment, and derived related memories. See
@@ -40,8 +42,8 @@ Document the following aspects accurately and concisely:
 - Do not claim the project uses vector databases like Pinecone or Weaviate when
   the architecture explicitly chooses pgvector in PostgreSQL.
 - Do not document features as complete if the code only contains stubs or TODOs.
-  Voice transcription, pgvector similarity, and Render deployment are **not**
-  implemented; mark them deferred.
+  pgvector ANN similarity and Render deployment are **not** implemented; mark
+  them deferred. Voice transcription **is** implemented.
 - Do not describe the frontend as "planned" — it exists in `frontend/`.
 
 ## Update cadence

@@ -17,6 +17,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from datetime import datetime
 from uuid import UUID
+import asyncio
+import os
+import re
+import tempfile
 import uuid
 
 from app.db import get_db, Memory, User, as_utc
@@ -99,17 +103,145 @@ async def _schedule_refinement(
             await run_tracked_job(str(refinement_job.id))
 
 
-async def _transcribe_audio(audio_bytes: bytes) -> str:
-    """Transcribe audio bytes to text.
+# ---------------------------------------------------------------------------
+# Voice transcription (local Whisper)
+#
+# The model is large and slow to load, so it is created once and cached per
+# model name. Decoding is CPU-bound and blocking, so it runs in a worker thread
+# via asyncio.to_thread -- otherwise it would stall the whole event loop for
+# every other request.
+# ---------------------------------------------------------------------------
 
-    Default implementation is a placeholder that raises an informative error
-    unless a transcription backend is configured. Override this function in
-    tests or configure a real provider (e.g. Ollama Whisper) in production.
+_whisper_model_cache: dict[str, object] = {}
+
+DEFAULT_WHISPER_MODEL = "base"
+
+
+def _whisper_model_name() -> str:
+    """Whisper model size to use, from WHISPER_MODEL (default 'base')."""
+    return (os.environ.get("WHISPER_MODEL") or DEFAULT_WHISPER_MODEL).strip()
+
+
+def _load_whisper_model(model_name: str):
+    """Load a faster-whisper model (uncached).
+
+    Imported lazily so the dependency is optional: an install without
+    faster-whisper can still run everything except voice capture. Kept separate
+    from the cache so tests can substitute a fake loader.
     """
-    raise HTTPException(
-        status_code=501,
-        detail="Voice transcription is not configured. Set up a transcription backend.",
-    )
+    from faster_whisper import WhisperModel
+
+    return WhisperModel(model_name, device="cpu", compute_type="int8")
+
+
+def _get_whisper_model(model_name: str):
+    """Return the cached model for this name, loading it on first use.
+
+    Loading Whisper is expensive (seconds and hundreds of MB), so it happens
+    once per model name and is reused for the process lifetime.
+    """
+    cached = _whisper_model_cache.get(model_name)
+    if cached is not None:
+        return cached
+
+    model = _load_whisper_model(model_name)
+    _whisper_model_cache[model_name] = model
+    return model
+
+
+def _transcribe_sync(audio_bytes: bytes) -> str:
+    """Blocking transcription. Runs in a worker thread.
+
+    faster-whisper decodes from a path or file-like object (via PyAV), not from
+    raw bytes, so the upload is spooled to a temporary file. Decoding happens
+    inside the `with` block, before the file is removed.
+    """
+    model = _get_whisper_model(_whisper_model_name())
+
+    suffix = _audio_suffix(audio_bytes)
+    handle = tempfile.NamedTemporaryFile(suffix=suffix, delete=False)
+    try:
+        handle.write(audio_bytes)
+        handle.flush()
+        handle.close()
+
+        segments, _info = model.transcribe(handle.name, beam_size=1)
+        # Segments carry their own leading whitespace, so join then collapse
+        # runs of whitespace rather than inserting another space.
+        return re.sub(
+            r"\s+", " ", " ".join(segment.text for segment in segments)
+        ).strip()
+    finally:
+        try:
+            os.unlink(handle.name)
+        except OSError:
+            pass
+
+
+def _audio_suffix(audio_bytes: bytes) -> str:
+    """Best-effort container extension, so the decoder gets a useful hint.
+
+    Falls back to .webm because the browser recorder produces webm/opus.
+    """
+    header = audio_bytes[:16]
+    if header.startswith(b"RIFF") and audio_bytes[8:12] == b"WAVE":
+        return ".wav"
+    if header.startswith(b"ID3") or header[:2] in (b"\xff\xfb", b"\xff\xf3"):
+        return ".mp3"
+    if header[4:8] == b"ftyp":
+        return ".m4a"
+    if header.startswith(b"OggS"):
+        return ".ogg"
+    if header.startswith(b"\x1aE\xdf\xa3"):
+        return ".webm"
+    return ".webm"
+
+
+async def _transcribe_audio(audio_bytes: bytes) -> str:
+    """Transcribe uploaded audio to text using a local Whisper model.
+
+    Raises:
+        HTTPException 400: the upload was empty or contained no speech.
+        HTTPException 501: Whisper is unavailable (dependency or model missing).
+        HTTPException 500: transcription failed for another reason.
+    """
+    if not audio_bytes:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No audio received.",
+        )
+
+    try:
+        text = await asyncio.to_thread(_transcribe_sync, audio_bytes)
+    except ImportError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_501_NOT_IMPLEMENTED,
+            detail=(
+                "Voice transcription is unavailable: faster-whisper is not "
+                "installed. Run `pip install faster-whisper` and set "
+                "WHISPER_MODEL if you want a different model size."
+            ),
+        ) from exc
+    except Exception as exc:
+        # Model download failures surface here too, so treat as a server-side
+        # setup problem when the message mentions loading the model.
+        if "model" in str(exc).lower() and "download" in str(exc).lower():
+            raise HTTPException(
+                status_code=status.HTTP_501_NOT_IMPLEMENTED,
+                detail=f"Whisper model could not be loaded: {exc}",
+            ) from exc
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Transcription failed: {exc}",
+        ) from exc
+
+    if not text:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No speech detected in the recording.",
+        )
+
+    return text
 
 
 def _extract_people_and_location(structured_content: dict | None) -> tuple[list[str], str | None]:

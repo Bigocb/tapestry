@@ -40,7 +40,7 @@ searchable corpus, browsable people and places, and generated narratives.
 
 **Memory processing**
 
-- Capture from text, voice (audio upload) or structured form
+- Capture from text, voice (transcribed locally with Whisper) or structured form
 - Background pipeline: capture → refinement → enrichment, tracked in `job_status`
 - Editing the source text requeues the pipeline; manual edits are preserved as
   overrides so reprocessing cannot clobber them
@@ -106,6 +106,7 @@ backup of the local SQLite database is advisable before schema changes.
 | `JWT_SECRET_KEY` | JWT signing secret |
 | `SESSION_IDLE_MINUTES` | Inactivity timeout (default 15) |
 | `SESSION_IDLE_WARNING_SECONDS` | Warning countdown (default 60) |
+| `WHISPER_MODEL` | Local Whisper size for voice (default `base`) |
 
 See `.env.example` for the template.
 
@@ -156,8 +157,11 @@ openwiki/              this wiki
 
 | Area | Status |
 |------|--------|
-| Voice transcription | Endpoint accepts audio but `_transcribe_audio` returns 501; no backend wired |
 | pgvector | Embeddings stored as JSON strings; similarity computed in Python, not via pgvector ANN |
 | Deployment | No `render.yaml`/`Dockerfile`; Render described in `DB_SETUP.md` only |
 | Attachments | Not started (images/video were requested) |
 | Scheduler | In-memory job store; no persistence or retry policy |
+
+Voice transcription is **implemented** (local Whisper), but note it requires
+`faster-whisper` and downloads model weights on first use, and CPU decoding is
+a few seconds per recording.

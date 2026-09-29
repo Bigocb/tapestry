@@ -109,6 +109,6 @@ than inserting rows directly, so they exercise the same path production uses.
 - **PostgreSQL path is unexercised.** pgvector similarity and `tsquery` search
   are not covered because the suite runs on SQLite
 - **No end-to-end browser tests.** The frontend has typecheck and lint only
-- **Voice transcription** is untested because it returns 501
+- **Voice transcription** is tested with a stubbed model, not real audio; accuracy is not asserted
 - **Concurrency** (two jobs racing the same memory) is designed against but not
   load-tested

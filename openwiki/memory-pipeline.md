@@ -22,8 +22,40 @@ Endpoints: `POST /api/memories/capture/{text,voice,form}` in
 5. Schedule refinement + enrichment via APScheduler
 6. Return immediately
 
-Voice captures first go through `_transcribe_audio`, which currently raises
-501 — no transcription backend is wired.
+Voice captures first go through `_transcribe_audio`, which transcribes locally
+with Whisper — see [Voice Transcription](#voice-transcription) below.
+
+## Voice Transcription
+
+`_transcribe_audio` in [`app/routes/memories.py`](../app/routes/memories.py)
+transcribes uploaded audio **locally** with `faster-whisper` (no audio leaves
+the machine, no API cost).
+
+Behaviour:
+
+- The model is **loaded once and cached** per model name — loading is slow and
+  allocates hundreds of MB
+- Decoding runs in a worker thread via `asyncio.to_thread`, because it is
+  CPU-bound and would otherwise block the whole event loop
+- Audio is spooled to a **temporary file** before decoding: faster-whisper
+  reads from a path or file-like object (via PyAV), not raw bytes
+- Container type is sniffed from the file header (wav/mp3/m4a/ogg/webm) so the
+  decoder gets a useful hint; the browser recorder's webm/opus is the default
+- Results are whitespace-normalised, since Whisper segments carry their own
+  leading spaces
+
+Failure modes are explicit rather than generic 500s:
+
+| Condition | Status |
+|-----------|--------|
+| Empty upload | 400 |
+| No speech detected | 400 |
+| `faster-whisper` not installed | 501 |
+| Model unavailable/download failure | 501 |
+| Any other decoding failure | 500 |
+
+Model size is configurable with `WHISPER_MODEL` (`tiny` … `large-v3`, default
+`base`). Weights download on first use.
 
 ## Agents
 
