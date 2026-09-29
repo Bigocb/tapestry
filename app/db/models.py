@@ -374,3 +374,91 @@ class JobStatus(Base):
     updated_at = Column(
         TIMESTAMP, server_default=func.now(), onupdate=func.now(), nullable=False
     )
+
+
+class Telling(Base):
+    """One act of recounting.
+
+    A telling owns the transcript and nothing else. Its segments are *proposed*
+    memories; they become real ``Memory`` rows only when the user commits, so a
+    draft can never leak into the timeline, search, or the entity graph.
+    """
+
+    __tablename__ = "tellings"
+
+    id = Column(GUID(), primary_key=True, default=uuid.uuid4)
+    user_id = Column(GUID(), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+
+    raw_transcript = Column(Text, nullable=False)
+    input_type = Column(String(20), nullable=False, default="text")
+    # transcribing | segmenting | draft | committed | failed
+    status = Column(String(20), nullable=False, default="draft")
+    error = Column(Text, nullable=True)
+
+    # Telling-wide fallback for segments with no date signal of their own.
+    frame_date = Column(TIMESTAMP, nullable=True)
+    frame_label = Column(String(120), nullable=True)
+
+    created_at = Column(TIMESTAMP, server_default=func.now(), nullable=False)
+    updated_at = Column(
+        TIMESTAMP, server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+    segments = relationship(
+        "TellingSegment",
+        back_populates="telling",
+        cascade="all, delete-orphan",
+        order_by="TellingSegment.ordinal",
+    )
+
+    __table_args__ = (
+        Index("idx_tellings_user_status", "user_id", "status"),
+        Index("idx_tellings_user_created", "user_id", "created_at"),
+    )
+
+
+class TellingSegment(Base):
+    """A proposed memory cut from a telling.
+
+    Deliberately not a ``Memory`` row with a draft flag: that would force every
+    existing read path to learn to exclude drafts, and would let entity sync
+    mint real entities from a split the user then discards.
+    """
+
+    __tablename__ = "telling_segments"
+
+    id = Column(GUID(), primary_key=True, default=uuid.uuid4)
+    telling_id = Column(
+        GUID(), ForeignKey("tellings.id", ondelete="CASCADE"), nullable=False
+    )
+    user_id = Column(GUID(), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+
+    ordinal = Column(Integer, nullable=False, default=0)
+    text = Column(Text, nullable=False)
+    # Same shape as ``memories.structured_content``, resolved once on the way in.
+    structured_content = Column(STRUCTURED_CONTENT_TYPE, nullable=True)
+
+    event_date = Column(TIMESTAMP, nullable=True)
+    date_precision = Column(String(20), nullable=True)
+    event_date_end = Column(TIMESTAMP, nullable=True)
+    date_label = Column(String(120), nullable=True)
+
+    # proposed | accepted | rejected
+    status = Column(String(20), nullable=False, default="proposed")
+    # Set at commit; links the created memory back to its segment.
+    memory_id = Column(
+        GUID(), ForeignKey("memories.id", ondelete="SET NULL"), nullable=True
+    )
+
+    created_at = Column(TIMESTAMP, server_default=func.now(), nullable=False)
+    updated_at = Column(
+        TIMESTAMP, server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+    telling = relationship("Telling", back_populates="segments")
+
+    __table_args__ = (
+        Index("idx_telling_segments_telling", "telling_id", "ordinal"),
+        Index("idx_telling_segments_user", "user_id"),
+        Index("idx_telling_segments_memory", "memory_id"),
+    )

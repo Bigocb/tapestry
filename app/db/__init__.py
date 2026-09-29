@@ -9,6 +9,8 @@ from .models import (
     EntityMerge,
     Story,
     JobStatus,
+    Telling,
+    TellingSegment,
 )
 from .datetime_utils import as_utc
 
@@ -25,5 +27,7 @@ __all__ = [
     "EntityMerge",
     "Story",
     "JobStatus",
+    "Telling",
+    "TellingSegment",
     "as_utc",
 ]

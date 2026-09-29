@@ -568,3 +568,60 @@ class ErrorResponse(BaseModel):
 
     detail: str
     status_code: int = 400
+
+
+# ============================================================================
+# TELLING MODELS
+# ============================================================================
+
+
+class TellingCreate(BaseModel):
+    """A recounting submitted for segmentation."""
+
+    raw_transcript: str = Field(..., min_length=1, max_length=20000)
+
+
+class TellingSegmentResponse(BaseModel):
+    """A proposed memory cut from a telling, awaiting review."""
+
+    id: UUID
+    ordinal: int
+    text: str
+    status: str
+    title: Optional[str] = None
+    summary: Optional[str] = None
+    structured_content: Optional[dict] = None
+    event_date: Optional[datetime] = None
+    date_precision: Optional[str] = None
+    event_date_end: Optional[datetime] = None
+    date_label: Optional[str] = None
+    memory_id: Optional[UUID] = None
+
+    class Config:
+        from_attributes = True
+
+
+class TellingSegmentUpdate(BaseModel):
+    """Edits to a proposed segment, applied before it is committed."""
+
+    text: Optional[str] = Field(None, min_length=1, max_length=20000)
+    title: Optional[str] = Field(None, max_length=255)
+    summary: Optional[str] = None
+    status: Optional[str] = None
+
+
+class TellingResponse(BaseModel):
+    """A telling together with its proposed split."""
+
+    id: UUID
+    raw_transcript: str
+    input_type: str
+    status: str
+    error: Optional[str] = None
+    frame_date: Optional[datetime] = None
+    frame_label: Optional[str] = None
+    created_at: datetime
+    segments: List[TellingSegmentResponse] = []
+
+    class Config:
+        from_attributes = True

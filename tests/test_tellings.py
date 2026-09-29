@@ -1,0 +1,523 @@
+"""Tests for Tellings (Issue 28): one recounting becomes many memories.
+
+A telling is a recounting. Its segments are *proposed* memories, held outside
+the ``memories`` table until the user commits them. These tests exercise the
+public API only.
+"""
+
+from datetime import datetime
+
+import pytest
+from fastapi.testclient import TestClient
+from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
+from sqlalchemy.orm import sessionmaker
+
+from app.main import app
+from app.db import Base, User, get_db
+from app.security import hash_password
+from app.models.schemas import StructuredMemory, EntityData
+
+
+TEST_DATABASE_URL = "sqlite+aiosqlite:///:memory:"
+
+TRANSCRIPT = (
+    "In the summer of 1985 we drove down to Florida. The next day we went to "
+    "Disney. Two years later I started college and met Dave."
+)
+
+
+@pytest.fixture
+async def test_db():
+    """Create an in-memory test database."""
+    from sqlalchemy.pool import StaticPool
+
+    engine = create_async_engine(
+        TEST_DATABASE_URL,
+        echo=False,
+        poolclass=StaticPool,
+    )
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    AsyncSessionLocal = sessionmaker(
+        engine, class_=AsyncSession, expire_on_commit=False, autoflush=False
+    )
+
+    async with AsyncSessionLocal() as session:
+        yield session
+
+
+@pytest.fixture
+def client(test_db):
+    """FastAPI test client with overridden database dependency."""
+
+    async def override_get_db():
+        yield test_db
+
+    app.dependency_overrides[get_db] = override_get_db
+
+    yield TestClient(app)
+
+    app.dependency_overrides.pop(get_db, None)
+
+
+@pytest.fixture
+def setup_users(test_db):
+    """Create test users in database."""
+
+    async def _setup():
+        user1 = User(
+            username="alice",
+            email="alice@example.com",
+            password_hash=hash_password("password123"),
+        )
+        user2 = User(
+            username="bob",
+            email="bob@example.com",
+            password_hash=hash_password("password456"),
+        )
+        test_db.add(user1)
+        test_db.add(user2)
+        await test_db.commit()
+        await test_db.refresh(user1)
+        await test_db.refresh(user2)
+        return user1, user2
+
+    return _setup
+
+
+@pytest.fixture
+def fake_structure_memory(monkeypatch):
+    """Replace the Capture Agent with a deterministic stub.
+
+    The telling pipeline structures its segments once, on the way in, so the
+    stub keeps tests off the network and makes the derived title predictable.
+    """
+
+    async def _fake(raw_input: str):
+        return StructuredMemory(
+            title="Structured: " + raw_input[:50],
+            summary=raw_input,
+            entities=[EntityData(type="concept", value="test")],
+            mood="neutral",
+            importance_level=5,
+            initial_tags=["test"],
+        )
+
+    monkeypatch.setattr("app.routes.tellings.structure_memory", _fake)
+
+
+@pytest.fixture
+def get_auth_token(client):
+    """Get JWT token for a user."""
+
+    def _get_token(username: str, password: str):
+        response = client.post(
+            "/api/auth/login",
+            json={"username": username, "password": password},
+        )
+        return response.json()["access_token"]
+
+    return _get_token
+
+
+def _auth(token: str) -> dict:
+    return {"Authorization": f"Bearer {token}"}
+
+
+class TestCaptureTelling:
+    """Tellings are submitted and come back as a reviewable draft."""
+
+    async def test_capturing_a_typed_telling_proposes_one_segment(
+        self, client, setup_users, get_auth_token, fake_structure_memory
+    ):
+        await setup_users()
+        token = get_auth_token("alice", "password123")
+
+        response = client.post(
+            "/api/tellings",
+            json={"raw_transcript": TRANSCRIPT},
+            headers=_auth(token),
+        )
+
+        assert response.status_code == 201
+        body = response.json()
+        assert body["raw_transcript"] == TRANSCRIPT
+        assert len(body["segments"]) == 1
+        assert body["segments"][0]["text"] == TRANSCRIPT
+
+    async def test_a_telling_can_be_fetched_with_its_segments(
+        self, client, setup_users, get_auth_token, fake_structure_memory
+    ):
+        await setup_users()
+        token = get_auth_token("alice", "password123")
+
+        created = client.post(
+            "/api/tellings",
+            json={"raw_transcript": TRANSCRIPT},
+            headers=_auth(token),
+        ).json()
+
+        response = client.get(f"/api/tellings/{created['id']}", headers=_auth(token))
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["id"] == created["id"]
+        assert body["raw_transcript"] == TRANSCRIPT
+        assert len(body["segments"]) == 1
+        assert body["segments"][0]["ordinal"] == 0
+
+    async def test_a_proposed_segment_carries_structured_content(
+        self, client, setup_users, get_auth_token, fake_structure_memory
+    ):
+        await setup_users()
+        token = get_auth_token("alice", "password123")
+
+        body = client.post(
+            "/api/tellings",
+            json={"raw_transcript": TRANSCRIPT},
+            headers=_auth(token),
+        ).json()
+
+        segment = body["segments"][0]
+        assert segment["title"].startswith("Structured:")
+        assert segment["summary"] == TRANSCRIPT
+        assert segment["status"] == "proposed"
+
+    async def test_a_segment_can_be_edited_before_commit(
+        self, client, setup_users, get_auth_token, fake_structure_memory
+    ):
+        await setup_users()
+        token = get_auth_token("alice", "password123")
+
+        body = client.post(
+            "/api/tellings",
+            json={"raw_transcript": TRANSCRIPT},
+            headers=_auth(token),
+        ).json()
+        telling_id, segment_id = body["id"], body["segments"][0]["id"]
+
+        response = client.patch(
+            f"/api/tellings/{telling_id}/segments/{segment_id}",
+            json={
+                "text": "Corrected text.",
+                "title": "My title",
+                "summary": "My summary",
+            },
+            headers=_auth(token),
+        )
+
+        assert response.status_code == 200
+        assert response.json()["title"] == "My title"
+
+        fetched = client.get(
+            f"/api/tellings/{telling_id}", headers=_auth(token)
+        ).json()
+        segment = fetched["segments"][0]
+        assert segment["text"] == "Corrected text."
+        assert segment["title"] == "My title"
+        assert segment["summary"] == "My summary"
+
+    async def test_a_segment_can_be_rejected(
+        self, client, setup_users, get_auth_token, fake_structure_memory
+    ):
+        await setup_users()
+        token = get_auth_token("alice", "password123")
+
+        body = client.post(
+            "/api/tellings",
+            json={"raw_transcript": TRANSCRIPT},
+            headers=_auth(token),
+        ).json()
+        telling_id, segment_id = body["id"], body["segments"][0]["id"]
+
+        response = client.patch(
+            f"/api/tellings/{telling_id}/segments/{segment_id}",
+            json={"status": "rejected"},
+            headers=_auth(token),
+        )
+
+        assert response.status_code == 200
+        assert response.json()["status"] == "rejected"
+
+    async def test_an_unknown_segment_status_is_rejected(
+        self, client, setup_users, get_auth_token, fake_structure_memory
+    ):
+        await setup_users()
+        token = get_auth_token("alice", "password123")
+
+        body = client.post(
+            "/api/tellings",
+            json={"raw_transcript": TRANSCRIPT},
+            headers=_auth(token),
+        ).json()
+        telling_id, segment_id = body["id"], body["segments"][0]["id"]
+
+        response = client.patch(
+            f"/api/tellings/{telling_id}/segments/{segment_id}",
+            json={"status": "banana"},
+            headers=_auth(token),
+        )
+
+        assert response.status_code == 400
+
+
+class TestCommitTelling:
+    """Committing turns accepted segments into real memories."""
+
+    async def test_committing_creates_a_memory_linked_to_the_telling(
+        self, client, setup_users, get_auth_token, fake_structure_memory
+    ):
+        await setup_users()
+        token = get_auth_token("alice", "password123")
+
+        draft = client.post(
+            "/api/tellings",
+            json={"raw_transcript": TRANSCRIPT},
+            headers=_auth(token),
+        ).json()
+
+        response = client.post(
+            f"/api/tellings/{draft['id']}/commit", headers=_auth(token)
+        )
+
+        assert response.status_code == 200
+        committed = response.json()
+        assert committed["status"] == "committed"
+
+        memory_id = committed["segments"][0]["memory_id"]
+        assert memory_id is not None
+
+        memory = client.get(f"/api/memories/{memory_id}", headers=_auth(token))
+        assert memory.status_code == 200
+        assert memory.json()["raw_input"] == TRANSCRIPT
+        assert memory.json()["title"] == draft["segments"][0]["title"]
+
+    async def test_commit_uses_reviewed_content_and_does_not_re_run_the_agent(
+        self, client, setup_users, get_auth_token, monkeypatch
+    ):
+        await setup_users()
+        token = get_auth_token("alice", "password123")
+
+        calls = []
+
+        async def _counting_structure(raw_input: str):
+            calls.append(raw_input)
+            return StructuredMemory(
+                title="Agent title",
+                summary=raw_input,
+                entities=[],
+                mood="neutral",
+                importance_level=5,
+                initial_tags=["test"],
+            )
+
+        monkeypatch.setattr(
+            "app.routes.tellings.structure_memory", _counting_structure
+        )
+
+        draft = client.post(
+            "/api/tellings",
+            json={"raw_transcript": TRANSCRIPT},
+            headers=_auth(token),
+        ).json()
+        assert len(calls) == 1, "structuring should happen once, on the way in"
+
+        segment_id = draft["segments"][0]["id"]
+        client.patch(
+            f"/api/tellings/{draft['id']}/segments/{segment_id}",
+            json={"title": "Reviewed title"},
+            headers=_auth(token),
+        )
+
+        committed = client.post(
+            f"/api/tellings/{draft['id']}/commit", headers=_auth(token)
+        ).json()
+
+        assert len(calls) == 1, "commit must not re-run the Capture Agent"
+
+        memory = client.get(
+            f"/api/memories/{committed['segments'][0]['memory_id']}",
+            headers=_auth(token),
+        ).json()
+        assert memory["title"] == "Reviewed title"
+
+    async def test_committed_memories_sync_entities_and_apply_review_flags(
+        self, client, setup_users, get_auth_token, monkeypatch
+    ):
+        await setup_users()
+        token = get_auth_token("alice", "password123")
+
+        async def _structured(raw_input: str):
+            return StructuredMemory(
+                title="Trip to Raleigh",
+                summary=raw_input,
+                entities=[EntityData(type="person", value="Dave")],
+                mood="happy",
+                importance_level=7,
+                initial_tags=["trip"],
+                event_date=datetime(1985, 7, 1),
+                date_precision="year",
+            )
+
+        monkeypatch.setattr("app.routes.tellings.structure_memory", _structured)
+
+        draft = client.post(
+            "/api/tellings",
+            json={"raw_transcript": TRANSCRIPT},
+            headers=_auth(token),
+        ).json()
+        committed = client.post(
+            f"/api/tellings/{draft['id']}/commit", headers=_auth(token)
+        ).json()
+
+        memory = client.get(
+            f"/api/memories/{committed['segments'][0]['memory_id']}",
+            headers=_auth(token),
+        ).json()
+        assert memory["event_date"] is not None
+        assert memory["needs_review"] is False
+
+        entities = client.get("/api/entities", headers=_auth(token)).json()
+        names = [item["canonical_name"] for item in entities["items"]]
+        assert "Dave" in names
+
+
+class TestDraftIsolation:
+    """An unreviewed telling must change nothing observable anywhere else.
+
+    This is the invariant the design rests on. Segments are not ``Memory`` rows
+    behind a draft flag, so an uncommitted split cannot appear in the timeline,
+    search, review queue or entity graph — and cannot mint entities the user
+    would then have to clean up.
+    """
+
+    async def _draft(self, client, token, monkeypatch):
+        async def _structured(raw_input: str):
+            return StructuredMemory(
+                title="Trip to Raleigh",
+                summary=raw_input,
+                entities=[EntityData(type="person", value="Dave")],
+                mood="happy",
+                importance_level=7,
+                initial_tags=["trip", "raleigh"],
+            )
+
+        monkeypatch.setattr("app.routes.tellings.structure_memory", _structured)
+        response = client.post(
+            "/api/tellings",
+            json={"raw_transcript": TRANSCRIPT},
+            headers=_auth(token),
+        )
+        assert response.status_code == 201
+        return response.json()
+
+    async def test_a_draft_telling_is_invisible_everywhere(
+        self, client, setup_users, get_auth_token, monkeypatch
+    ):
+        await setup_users()
+        token = get_auth_token("alice", "password123")
+
+        await self._draft(client, token, monkeypatch)
+
+        assert client.get("/api/memories", headers=_auth(token)).json() == []
+        assert client.get("/api/timeline", headers=_auth(token)).json() == []
+        assert client.get("/api/review", headers=_auth(token)).json()["items"] == []
+        assert client.get("/api/entities", headers=_auth(token)).json()["items"] == []
+
+        search = client.post(
+            "/api/memories/search",
+            json={"text": "Raleigh"},
+            headers=_auth(token),
+        ).json()
+        assert search["results"] == []
+
+    async def test_committing_is_what_makes_it_visible(
+        self, client, setup_users, get_auth_token, monkeypatch
+    ):
+        """Guards the test above from passing vacuously."""
+        await setup_users()
+        token = get_auth_token("alice", "password123")
+
+        draft = await self._draft(client, token, monkeypatch)
+        client.post(f"/api/tellings/{draft['id']}/commit", headers=_auth(token))
+
+        assert len(client.get("/api/memories", headers=_auth(token)).json()) == 1
+        entities = client.get("/api/entities", headers=_auth(token)).json()
+        assert [item["canonical_name"] for item in entities["items"]] == ["Dave"]
+
+
+class TestTellingReviewAndOwnership:
+    """Rejection excludes a segment; a telling belongs to one user."""
+
+    async def test_a_rejected_segment_produces_no_memory(
+        self, client, setup_users, get_auth_token, fake_structure_memory
+    ):
+        await setup_users()
+        token = get_auth_token("alice", "password123")
+
+        draft = client.post(
+            "/api/tellings",
+            json={"raw_transcript": TRANSCRIPT},
+            headers=_auth(token),
+        ).json()
+        segment_id = draft["segments"][0]["id"]
+
+        client.patch(
+            f"/api/tellings/{draft['id']}/segments/{segment_id}",
+            json={"status": "rejected"},
+            headers=_auth(token),
+        )
+        committed = client.post(
+            f"/api/tellings/{draft['id']}/commit", headers=_auth(token)
+        ).json()
+
+        assert committed["segments"][0]["memory_id"] is None
+        assert client.get("/api/memories", headers=_auth(token)).json() == []
+
+    async def test_a_telling_is_visible_only_to_its_owner(
+        self, client, setup_users, get_auth_token, fake_structure_memory
+    ):
+        await setup_users()
+        alice = get_auth_token("alice", "password123")
+        bob = get_auth_token("bob", "password456")
+
+        draft = client.post(
+            "/api/tellings",
+            json={"raw_transcript": TRANSCRIPT},
+            headers=_auth(alice),
+        ).json()
+
+        assert (
+            client.get(f"/api/tellings/{draft['id']}", headers=_auth(bob)).status_code
+            == 404
+        )
+        assert (
+            client.post(
+                f"/api/tellings/{draft['id']}/commit", headers=_auth(bob)
+            ).status_code
+            == 404
+        )
+
+    async def test_committing_twice_is_refused(
+        self, client, setup_users, get_auth_token, fake_structure_memory
+    ):
+        await setup_users()
+        token = get_auth_token("alice", "password123")
+
+        draft = client.post(
+            "/api/tellings",
+            json={"raw_transcript": TRANSCRIPT},
+            headers=_auth(token),
+        ).json()
+
+        first = client.post(
+            f"/api/tellings/{draft['id']}/commit", headers=_auth(token)
+        )
+        second = client.post(
+            f"/api/tellings/{draft['id']}/commit", headers=_auth(token)
+        )
+
+        assert first.status_code == 200
+        assert second.status_code == 409
+        assert len(client.get("/api/memories", headers=_auth(token)).json()) == 1

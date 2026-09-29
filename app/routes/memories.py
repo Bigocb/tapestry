@@ -24,6 +24,7 @@ import tempfile
 import uuid
 
 from app.db import get_db, Memory, User, as_utc
+from app.db.memory_writes import apply_memory_date_fields, apply_review_flags
 from app.agents.capture import structure_memory
 from app.agents.embeddings import (
     cosine_similarity,
@@ -271,39 +272,6 @@ def _extract_people_and_location(structured_content: dict | None) -> tuple[list[
     return sorted(people), location
 
 
-def _apply_memory_date_fields(memory: Memory, structured) -> None:
-    """Copy resolved date fields from a StructuredMemory onto the row.
-
-    Keeps event_date, precision, range end and label together so a fuzzy
-    period survives persistence instead of being flattened to a single day.
-    """
-    memory.event_date = structured.event_date
-    memory.date_precision = getattr(structured, "date_precision", None)
-    memory.event_date_end = getattr(structured, "event_date_end", None)
-    memory.date_label = getattr(structured, "date_label", None)
-
-
-def _apply_review_flags(memory: Memory) -> None:
-    """Flag a memory for the review queue when the pipeline couldn't complete.
-
-    A missing event date is the current reason: without one the memory cannot
-    be placed on the timeline. A fuzzy period (decade, range, named life
-    period) is a real answer, not a missing one, so a dated-but-fuzzy memory is
-    NOT sent to review.
-    """
-    has_time_signal = (
-        memory.event_date is not None
-        or memory.date_precision in ("decade", "range")
-        or bool(memory.date_label)
-    )
-    if has_time_signal:
-        memory.needs_review = False
-        memory.review_reason = None
-    else:
-        memory.needs_review = True
-        memory.review_reason = "missing_date"
-
-
 def _memory_response(
     memory: Memory, unlocked_ids: set[str] | None = None
 ) -> MemoryResponse:
@@ -431,7 +399,7 @@ async def _structure_and_update_memory(
     memory.mood = structured.mood
     memory.importance_level = structured.importance_level
     memory.tags = structured.initial_tags
-    _apply_memory_date_fields(memory, structured)
+    apply_memory_date_fields(memory, structured)
 
     # Merge form-only fields (people, location) into structured_content.
     existing = memory.structured_content or {}
@@ -442,7 +410,7 @@ async def _structure_and_update_memory(
     memory.structured_content = existing
 
     memory.processing_state = "capturing"
-    _apply_review_flags(memory)
+    apply_review_flags(memory)
 
     # Attach first-class entities so people/places are queryable immediately,
     # before the async pipeline runs.
@@ -1079,7 +1047,7 @@ async def update_memory(
                 memory.date_label = content["date_label"]
 
     memory.structured_content = content
-    _apply_review_flags(memory)
+    apply_review_flags(memory)
 
     # If the source text changed, re-run the agents. Fields the user set in
     # this request are passed as overrides so they survive the rerun.
