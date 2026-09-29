@@ -875,10 +875,213 @@ Documentation:
 
 ---
 
+## PHASE 9: Tellings (Repeated Recall → Many Memories)
+
+**Type:** AFK · **Triage:** ready-for-agent
+**Blocked by:** Nothing. Builds on the capture path (Issues 4-6), timeline
+(Issue 17), capture UI (Issue 19) and the scheduler (Issue 26).
+**Design:** `docs/TELLING_MODEL.md`
+
+### Problem Statement
+
+Memories do not arrive one at a time. When someone sits down to talk about a
+period of their life they tell a story — a dozen memories in one breath. The
+product accepts a single memory per capture, so the user either fragments the
+story into artificial pieces or loses it.
+
+Dates make this worse. A spoken account is full of relative time — "the next
+day", "two years later", "the following summer" — anchored to earlier moments
+in the same account. The current date resolver anchors every relative phrase to
+*today*, so a story about 1985 comes back dated to this week.
+
+Because capture is one-at-a-time, the resulting memories also have no shared
+provenance: there is no way to see that six memories came from one sitting, and
+no way to undo a bad capture as a unit.
+
+### Solution
+
+Let the user tell the story once, typed or spoken. The system transcribes it,
+proposes a split into individual memories, and shows that proposal for review.
+Nothing is saved until the user commits. At commit, each accepted segment
+becomes a memory through the normal write path, and every memory links back to
+the telling it came from.
+
+Dates resolve *within the narrative*: an absolute date sets an anchor, relative
+phrases move from it, and a story-wide frame ("high school", "the summer of
+1985") is inherited by undated parts rather than being dropped into the review
+queue.
+
+The original telling is kept, so a bad split can be re-run and a bad commit
+undone as a unit.
+
+### User Stories
+
+1. As someone recounting a period of my life, I want to speak the whole story in
+   one go, so that I do not have to break it into single sentences.
+2. As someone with a lot to say, I want to type a long multi-paragraph account,
+   so that I can capture it without a microphone.
+3. As a user, I want my spoken telling transcribed automatically, so that I can
+   talk naturally instead of writing.
+4. As a user, I want the system to propose how to split my telling into separate
+   memories, so that each moment becomes its own entry.
+5. As a user, I want to see the proposed split before anything is saved, so that
+   a bad split never pollutes my memories.
+6. As a user, I want to merge two proposed segments, so that one memory is not
+   fractured into two.
+7. As a user, I want to split a proposed segment, so that two distinct moments
+   are not welded into one.
+8. As a user, I want to delete a proposed segment, so that false starts and
+   asides do not become memories.
+9. As a user, I want to reorder proposed segments, so that the narrative reads
+   in the right sequence.
+10. As a user, I want to edit a segment's text, so that a transcription error
+    does not become permanent.
+11. As a user, I want to edit a segment's title, so that the memory reads the
+    way I remember it.
+12. As a user, I want each segment's date resolved against the rest of the
+    story, so that "the next day" means the day after the event I just
+    described.
+13. As a user, I want a story-wide period applied to parts with no date of their
+    own, so that undated moments are not lost.
+14. As a user, I want fuzzy dates to stay fuzzy, so that "sometime in 1985" does
+    not become a fake precise timestamp.
+15. As a user, I want to correct any resolved date manually, so that I remain in
+    control of my own history.
+16. As a user, I want segments with no time signal at all flagged for review, so
+    that I can date them later rather than losing them.
+17. As a user, I want to commit the reviewed split in a single action, so that
+    all of its memories appear together.
+18. As a user, I want every committed memory to link back to the telling it came
+    from, so that I can see where it came from.
+19. As a user, I want to see all the memories one telling produced, so that I can
+    review the result.
+20. As a user, I want to re-split a telling after editing its text, so that I can
+    fix a segmentation I got wrong.
+21. As a user, I want to delete every memory from one telling in a single
+    action, so that a bad commit is reversible.
+22. As a user, I want the people and places in my story linked to the same
+    entities across all of its memories, so that my entity graph stays
+    consistent.
+23. As a user, I want nothing from an uncommitted telling to appear in my
+    timeline, search, review queue or entity lists, so that drafts cannot
+    confuse or pollute my library.
+24. As a user, I want my telling kept even if transcription or segmentation
+    fails, so that I never lose words I have already spoken.
+25. As a user, I want to see progress while a long telling is being transcribed
+    and split, so that I know it is working and not stuck.
+26. As a user, I want to mark a memory that came from a telling as private, so
+    that my shoulder-surfing shield still applies.
+27. As a user, I want the story I told to remain readable, so that I can go back
+    and re-read it.
+28. As a user, I want my tellings visible only to me, so that nobody else can
+    read them.
+29. As a user, I want to abandon a telling I started, so that a half-reviewed
+    draft does not linger.
+30. As a user, I want the split to respect the way I actually tell stories, so
+    that the result feels like my memories rather than machine fragments.
+
+### Implementation Decisions
+
+- **Two new tables**, `tellings` and `telling_segments`. Full schema, indexes
+  and rationale are in the design doc.
+- **Drafts are never rows in `memories`.** They live only in `telling_segments`
+  until commit. This is the central decision: a flag on `memories` would force
+  every existing read path to learn to exclude drafts, and entity sync would
+  mint real entities from a split the user may discard.
+- **New segmentation agent** returning an ordered list of segments. It returns
+  each segment's verbatim text rather than character offsets, since models
+  miscount offsets and the full transcript is retained as the source of truth.
+  Its output is normalised once, on the way in, through the same validation the
+  single-memory capture path already uses.
+- **Date resolution splits into two responsibilities**: an absolute resolver
+  (explicit dates, fuzzy periods, named life periods) and a relative-offset
+  resolver. A cursor is threaded through the narrative — absolute resets it,
+  relative computes off it. Precision may coarsen but never sharpen.
+- **The telling carries its own frame date and label**, inherited by otherwise
+  undated segments.
+- **Commit does not re-run the Capture Agent.** The reviewed segment content is
+  authoritative; re-structuring each segment in isolation would destroy exactly
+  the narrative context segmentation recovered. Commit writes the reviewed
+  fields directly, then reuses the existing entity-sync and review-flag helpers
+  so entities, review flags and privacy behave identically to a normal capture.
+- **API contracts:**
+  - `POST /tellings` — submit a typed telling; returns the telling in
+    `segmenting`.
+  - `POST /tellings/voice` — submit audio; returns the telling in
+    `transcribing`.
+  - `GET /tellings/{id}` — telling with its status, transcript and segments.
+  - `PATCH /tellings/{id}` — edit the transcript and trigger re-segmentation.
+  - `PATCH /tellings/{id}/segments/{segment_id}` — edit, accept or reject a
+    segment.
+  - `POST /tellings/{id}/segments/merge` and `.../split` — structural edits.
+  - `POST /tellings/{id}/commit` — create memories from accepted segments.
+  - `DELETE /tellings/{id}` — discard a draft, or all memories from a
+    committed telling.
+- **Long-running work runs in the background** using the existing scheduler and
+  job-status mechanism; the client polls the telling until it is `draft`.
+- **The transcript is stored; audio is not.** Re-splitting only needs text.
+- **Naming:** the input concept is a *Telling*. `Story` already means a
+  narrative *generated from* memories, and the two must not share a name.
+- **Frontend:** a mode on the capture surface for "tell a story" rather than
+  "capture one memory", plus a review screen for the proposed split.
+
+### Testing Decisions
+
+- **A good test here exercises external behaviour only** — the public API and
+  the pure resolution functions — never internal call sequences or private
+  helpers. The suite runs on SQLite, so tests must not depend on Postgres-only
+  behaviour.
+- **Pure function seam — the date cursor.** Table-driven tests over pairs of
+  narrative lines and expected resolved dates: absolute resets, relative moves
+  the cursor, precision coarsens, the telling frame is inherited, backwards
+  references work, and a jump to a new absolute re-anchors cleanly. Prior art:
+  the fuzzy-date resolver tests.
+- **Function seam with a faked model — segmentation.** Assert verbatim span
+  text, normalisation of fields, ordering, and that an unreachable or unusable
+  model falls back to a single segment covering the whole transcript rather
+  than losing the words. Prior art: the existing capture-agent tests.
+- **HTTP seam — commit.** Commit creates one memory per accepted segment, links
+  them back, syncs entities and applies review flags. Prior art: the memory
+  capture tests.
+- **HTTP seam — lifecycle.** Create, transcribe, segment, edit, merge, split,
+  commit, discard. Prior art: the review-queue tests.
+- **HTTP seam — draft isolation invariant.** This is the important one. Before
+  commit, a telling must change *nothing* observable elsewhere: no memory,
+  timeline, review-queue or search response mentions it, and no entity count
+  moves. This is the external-behaviour test for the central design decision,
+  and it is the test that would catch entity pollution from discarded drafts.
+  Prior art: the privacy-lock tests.
+
+Build order: cursor, then segmentation, then commit, then lifecycle and the
+isolation invariant.
+
+### Out of Scope
+
+- Speaker diarisation ("who said what") — a telling is first-person.
+- Chunking very long tellings that exceed one segmentation call's context.
+  Deferred until a real transcript proves the need.
+- Storing audio for re-transcription after a future transcription upgrade.
+- A browsable list of past tellings; the review screen is the only surface.
+- Editing the transcript after commit.
+- Languages other than English.
+
+### Further Notes
+
+- The full design — schema, indexes, cursor algorithm, privacy and the
+  rejected alternatives — is in the design doc, which this PRD summarises
+  rather than duplicates.
+- The primary input is **speech**, and transcription output has no paragraphs
+  and unreliable punctuation. Segmentation must be proven against one real,
+  rambling recording before the approach is considered settled.
+- The review screen is the largest new frontend surface; the existing memory
+  editor is a likely base for the segment editor.
+
+---
+
 ## Summary
 
-**Total Issues:** 27  
-**Vertical slices:** Organized in 8 phases (Foundation → Infrastructure → Core Processing → Search → Management → Narrative → Timeline → Deployment)
+**Total Issues:** 27 numbered issues, plus Phase 9  
+**Vertical slices:** Organized in 8 build phases (Foundation → Infrastructure → Core Processing → Search → Management → Narrative → Timeline → Deployment), plus **Phase 9 (Tellings)**, added as a PRD-stage phase not yet broken into issues. Note also that the deployment target is no longer Render: MEMIND now runs on the homelab box behind Traefik and cloudflared at `memory.cloutier.work`, with Postgres.
 
 **Current status (2026-09-22):** 24 of 27 issues done; 3 partial (1, 4, 7) and 1 not started (27).
 
@@ -887,6 +1090,7 @@ Documentation:
 2. **Voice transcription (Issue 4)** — wire an actual transcription backend; today `_transcribe_audio` returns 501.
 3. **Frontend depth (Issues 20–22, 24)** — semantic search mode, date filters, relevance scores, pagination, rich-text/entity editor, related-memories sidebar, autosave, streak counter.
 4. **Capture & parsing quality (Issues 4–6)** — active iteration area.
+5. **Tellings (Phase 9)** — multi-memory capture from a single recounting. PRD ready for an agent; not started. The date cursor and segmenter are the suggested first slices.
 
 **Dependencies:**
 - Phase 1 (Foundation) has no blockers
@@ -897,6 +1101,9 @@ Documentation:
 - Phase 6 (Timeline) blocked by Phase 2-3
 - Phase 7 (Frontend) blocked by Phase 1-4
 - Phase 8 (Deployment) blocked by all preceding phases
+- Phase 9 (Tellings) blocked by the capture path (Issues 4-6), the timeline (17), the capture UI (19) and the scheduler (26) — all of which are done
 
 **Estimated effort:** ~60-80 developer hours for MVP (Phase 1-6 complete)
+
+**Phase 9 estimate:** the date cursor and segmenter are self-contained (roughly a day each with tests); schema, endpoints, commit path and the review UI are the bulk of the work.
 
