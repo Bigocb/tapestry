@@ -42,7 +42,11 @@ from app.models.schemas import (
 )
 from app.dependencies import get_current_user
 from app.privacy import LOCKED_SUMMARY, LOCKED_TITLE, get_unlocked_memory_ids, is_locked
-from app.db.entities import entity_ids_for_memory, recompute_entity_stats
+from app.db.entities import (
+    entity_ids_for_memory,
+    recompute_entity_stats,
+    sync_memory_entities,
+)
 
 router = APIRouter()
 
@@ -304,6 +308,13 @@ async def _structure_and_update_memory(
 
     memory.processing_state = "capturing"
     _apply_review_flags(memory)
+
+    # Attach first-class entities so people/places are queryable immediately,
+    # before the async pipeline runs.
+    await sync_memory_entities(
+        db, str(memory.user_id), str(memory.id), memory.structured_content
+    )
+
     await db.commit()
     await db.refresh(memory)
 

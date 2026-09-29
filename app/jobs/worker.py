@@ -21,6 +21,7 @@ from app.jobs.scheduler import (
     scheduler,
 )
 from app.db import Memory, JobStatus
+from app.db.entities import sync_memory_entities
 from app.agents.embeddings import (
     cosine_similarity,
     deserialize_embedding,
@@ -156,6 +157,11 @@ async def _run_refinement(memory: Memory, db: AsyncSession) -> None:
     memory.event_date_end = refined.event_date_end
     memory.date_label = refined.date_label
 
+    # Refinement can rename or drop entities, so re-sync the mentions.
+    await sync_memory_entities(
+        db, str(memory.user_id), str(memory.id), memory.structured_content
+    )
+
 
 async def _run_enrichment(memory: Memory, db: AsyncSession) -> None:
     """Run the Enrichment Agent on a memory using similar memories as context."""
@@ -193,6 +199,11 @@ async def _run_enrichment(memory: Memory, db: AsyncSession) -> None:
     else:
         memory.needs_review = False
         memory.review_reason = None
+
+    # Enrichment writes the final content, so this sync is authoritative.
+    await sync_memory_entities(
+        db, str(memory.user_id), str(memory.id), memory.structured_content
+    )
 
 
 def _apply_overrides(memory: Memory, overrides: dict | None) -> None:

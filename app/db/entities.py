@@ -108,13 +108,87 @@ async def recompute_entity_stats(
     for entity in result.scalars().all():
         await _recompute_mention_stats(db, entity)
 
-
 async def entity_ids_for_memory(db: AsyncSession, memory_id: str) -> list[str]:
     """Return the ids of entities mentioned in a memory."""
     result = await db.execute(
         select(MemoryEntity.entity_id).where(MemoryEntity.memory_id == memory_id)
     )
     return [str(eid) for eid in result.scalars().all()]
+
+
+def extract_mentions(
+    structured_content: dict | None,
+) -> list[tuple[str, str, Optional[str]]]:
+    """Pull first-class entity mentions out of a structured_content dict.
+
+    Returns ``(kind, surface_form, role)`` triples. The role comes from the
+    agent's ``metadata.relation`` (e.g. "wife") or ``metadata.role``.
+
+    Dates are handled by event_date, and event/concept stay as JSON, so only
+    person/place/organization are returned.
+    """
+    if not isinstance(structured_content, dict):
+        return []
+
+    raw = structured_content.get("entities")
+    if not isinstance(raw, list):
+        return []
+
+    mentions: list[tuple[str, str, Optional[str]]] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        kind = item.get("type")
+        value = item.get("value")
+        if kind not in FIRST_CLASS_KINDS or not value:
+            continue
+
+        role = None
+        metadata = item.get("metadata")
+        if isinstance(metadata, dict):
+            role = metadata.get("relation") or metadata.get("role")
+        mentions.append((str(kind), str(value), str(role) if role else None))
+
+    return mentions
+
+
+async def sync_memory_entities(
+    db: AsyncSession,
+    user_id: str,
+    memory_id: str,
+    structured_content: dict | None,
+) -> list[Entity]:
+    """Make the mentions of a memory match its current content exactly.
+
+    This is the single entry point for every stage that writes
+    ``structured_content`` (capture, refinement, enrichment). Because
+    reprocessing rewrites the whole content, this *replaces* the memory's
+    mentions rather than only adding: anything no longer present is detached,
+    so stale links cannot linger and counts stay truthful.
+
+    Entities themselves are never deleted -- an entity with no remaining
+    mentions simply has ``mention_count == 0``.
+    """
+    desired = extract_mentions(structured_content)
+
+    # Which entities does the memory currently point at?
+    previously = set(await entity_ids_for_memory(db, memory_id))
+
+    # Drop all existing mentions for this memory; we re-add the desired set.
+    existing_rows = (
+        await db.execute(select(MemoryEntity).where(MemoryEntity.memory_id == memory_id))
+    ).scalars().all()
+    for row in existing_rows:
+        await db.delete(row)
+    await db.flush()
+
+    touched = await apply_mentions(db, user_id, memory_id, desired)
+
+    # Refresh the counts of anything that gained or lost a mention.
+    affected = previously | {str(entity.id) for entity in touched}
+    await recompute_entity_stats(db, affected)
+
+    return touched
 
 
 async def apply_mentions(
@@ -128,8 +202,10 @@ async def apply_mentions(
     ``mentions`` is a sequence of ``(kind, surface_form, role)``. Only
     first-class kinds are stored. Returns the entities touched.
 
-    Idempotent: re-running for the same memory (e.g. after reprocessing) does
-    not duplicate mentions or inflate counts.
+    Adds without removing, so it is safe to call repeatedly: an existing
+    mention for the same (memory, entity, surface form) is not duplicated.
+    Use :func:`sync_memory_entities` when the content has been rewritten and
+    vanished mentions must be dropped.
     """
     touched: list[Entity] = []
 
