@@ -1,0 +1,72 @@
+name: memind
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: memind-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: memind
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}
+      POSTGRES_DB: memind
+      TZ: ${TZ:-America/New_York}
+    volumes:
+      - memind-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U memind -d memind"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    networks:
+      - mediasnet
+
+  backend:
+    build:
+      context: .
+    container_name: memind-backend
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+psycopg://memind:${POSTGRES_PASSWORD}@db:5432/memind
+      OLLAMA_API_BASE: ${OLLAMA_API_BASE:-https://ollama.com/v1}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-gemma4:31b}
+      OLLAMA_API_KEY: ${OLLAMA_API_KEY:?OLLAMA_API_KEY must be set in .env}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:?JWT_SECRET_KEY must be set in .env}
+      SESSION_IDLE_MINUTES: ${SESSION_IDLE_MINUTES:-15}
+      SESSION_IDLE_WARNING_SECONDS: ${SESSION_IDLE_WARNING_SECONDS:-60}
+      WHISPER_MODEL: ${WHISPER_MODEL:-base}
+      TZ: ${TZ:-America/New_York}
+    volumes:
+      - memind-whisper:/root/.cache/huggingface
+    ports:
+      - "8010:8000"
+    networks:
+      - mediasnet
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        BACKEND_ORIGIN: http://backend:8000
+    container_name: memind-frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    environment:
+      BACKEND_ORIGIN: http://backend:8000
+      TZ: ${TZ:-America/New_York}
+    ports:
+      - "3010:3000"
+    networks:
+      - mediasnet
+
+volumes:
+  memind-pgdata:
+  memind-whisper:
+
+networks:
+  mediasnet:
+    external: true
+    name: media-stack_default

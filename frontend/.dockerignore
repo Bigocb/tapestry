@@ -1,0 +1,15 @@
+node_modules/
+.next/
+out/
+npm-debug.log*
+
+.env
+.env.*
+!.env.example
+
+.git/
+.gitignore
+AGENTS.md
+CLAUDE.md
+README.md
+tsconfig.tsbuildinfo

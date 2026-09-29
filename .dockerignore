@@ -1,0 +1,27 @@
+# Local environments and caches
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+
+# Secrets and local databases
+.env
+.env.*
+!.env.example
+memind.db
+memind.db.*
+
+# Frontend is built from its own context
+frontend/
+
+# Docs, tests and tooling not needed at runtime
+tests/
+docs/
+openwiki/
+.github/
+.idea/
+.vscode/
+.git/
+*.md
