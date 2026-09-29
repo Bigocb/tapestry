@@ -22,3 +22,6 @@ venv/
 
 # Local SQLite database
 memind.db
+
+# Local DB backups
+memind.db.*
