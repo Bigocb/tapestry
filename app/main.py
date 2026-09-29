@@ -236,6 +236,83 @@ async def _apply_pending_migrations() -> None:
             )
             print("Added missing entities_backfilled column to memories table.")
     await _backfill_entities()
+    await _backfill_fuzzy_metadata()
+
+
+async def _backfill_fuzzy_metadata() -> None:
+    """Re-derive date precision/label for memories captured before fuzzy dates.
+
+    Memories processed by the early pipeline could carry an event_date with no
+    precision or label, so "the 80s" ended up as a bare 1980-01-01 that the
+    timeline cannot group. Re-resolve the raw text for those rows and backfill
+    precision, range end and label where the resolver finds something fuzzy.
+    Only fills blanks -- never overwrites an explicit value.
+    """
+    from app.agents.capture import resolve_date
+    from app.db import AsyncSessionLocal
+
+    async with AsyncSessionLocal() as session:
+        pending = (
+            await session.execute(
+                text(
+                    "SELECT id, raw_input FROM memories "
+                    "WHERE event_date IS NOT NULL "
+                    "AND (date_precision IS NULL OR date_precision = '') "
+                    "AND (date_label IS NULL OR date_label = '')"
+                )
+            )
+        ).fetchall()
+
+        if not pending:
+            return
+
+        updated = 0
+        for memory_id, raw_input in pending:
+            # Never touch a precision the user set deliberately; only fill
+            # rows that predate fuzzy metadata entirely.
+            resolved = resolve_date(raw_input or "")
+            # Only fuzzy answers improve a bare exact-date row; a plain
+            # resolved date that matches what is already stored adds nothing.
+            if resolved.precision not in ("decade", "range"):
+                continue
+            if not resolved.event_date:
+                continue
+
+            if resolved.label:
+                label = resolved.label
+            elif resolved.precision == "decade":
+                label = f"{resolved.event_date.year}s"
+            else:
+                label = f"{resolved.event_date.year}"
+                if resolved.event_date_end:
+                    label += f"-{resolved.event_date_end.year}"
+
+            await session.execute(
+                text(
+                    "UPDATE memories SET date_precision = :p, "
+                    "event_date_end = :e, date_label = :l WHERE id = :i"
+                ),
+                {
+                    "p": resolved.precision,
+                    "e": (
+                        resolved.event_date_end.astimezone(timezone.utc).replace(
+                            tzinfo=None
+                        )
+                        if resolved.event_date_end
+                        else None
+                    ),
+                    "l": label[:120] if label else None,
+                    "i": memory_id,
+                },
+            )
+            updated += 1
+
+        await session.commit()
+        if updated:
+            print(
+                f"Backfilled fuzzy date metadata for {updated} memories "
+                "(decade/range precision and labels)."
+            )
 
 
 async def _backfill_entities() -> None:

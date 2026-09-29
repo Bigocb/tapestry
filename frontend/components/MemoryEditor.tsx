@@ -374,8 +374,11 @@ export function MemoryEditor({ id }: { id: string }) {
                     }
                     onChange={(e) => {
                       const year = Number(e.target.value);
-                      if (!year) {
-                        update("event_date", undefined);
+                      // Partial input ("19") is valid to type but too small to
+                      // anchor yet; NaN (non-numeric) must not reach Date.UTC,
+                      // which produced "Invalid time value" crashes.
+                      if (!Number.isFinite(year) || year < 1000 || year > 2999) {
+                        if (!e.target.value) update("event_date", undefined);
                         return;
                       }
                       update("event_date", new Date(Date.UTC(year, 0, 1)).toISOString());
@@ -400,11 +403,15 @@ export function MemoryEditor({ id }: { id: string }) {
                     }
                     onChange={(e) => {
                       const year = Number(e.target.value);
+                      if (!Number.isFinite(year) || year < 1000 || year > 2999) {
+                        if (!e.target.value) update("event_date_end", undefined);
+                        return;
+                      }
                       update(
                         "event_date_end",
-                        year ? new Date(Date.UTC(year, 11, 31)).toISOString() : undefined
+                        new Date(Date.UTC(year, 11, 31)).toISOString()
                       );
-                      if (year) update("date_precision", "range");
+                      update("date_precision", "range");
                     }}
                   />
                 </label>

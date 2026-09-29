@@ -54,6 +54,10 @@ export function formatMemoryDate(memory: DatedMemory): string {
  * Two memories describe the same period when their labels match after dropping
  * a trailing "(1987-1990)" range, so "Middle school" and
  * "Middle school (1987-1990)" land in one section rather than splitting.
+ *
+ * Unlabeled fuzzy memories get a key derived from their precision, so the
+ * 1980s section collects every decade memory whether or not it was labelled,
+ * and a range groups by its year span rather than by its raw start date.
  */
 export function timelineGroupKey(memory: DatedMemory): string {
   if (memory.date_label) {
@@ -65,14 +69,21 @@ export function timelineGroupKey(memory: DatedMemory): string {
   if (memory.event_date) {
     const start = new Date(memory.event_date);
     switch (memory.date_precision) {
-      case "decade":
+      case "decade": {
+        // "1980s" collects labelled and unlabelled decade memories alike.
+        const decade = Math.floor(start.getFullYear() / 10) * 10;
+        return `${decade}s`;
+      }
       case "year":
         return String(start.getFullYear());
       case "range": {
         const end = memory.event_date_end
           ? new Date(memory.event_date_end)
           : null;
-        return end ? `${start.getFullYear()}-${end.getFullYear()}` : String(start.getFullYear());
+        // An open-ended range groups by its decade so it still clusters.
+        return end
+          ? `${start.getFullYear()}-${end.getFullYear()}`
+          : `${Math.floor(start.getFullYear() / 10) * 10}s`;
       }
       default:
         return start.toLocaleDateString();
