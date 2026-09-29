@@ -51,18 +51,22 @@ export function formatMemoryDate(memory: DatedMemory): string {
 /**
  * Section key for grouping memories on the timeline.
  *
- * Two memories describe the same period when their labels match after dropping
- * a trailing "(1987-1990)" range, so "Middle school" and
- * "Middle school (1987-1990)" land in one section rather than splitting.
+ * Labels are compared case- and whitespace-insensitively, and a trailing
+ * "(1987-1990)" range is dropped, so "Middle School", "Middle school" and
+ * "Middle school (1987-1990)" all land in one section. Without this they
+ * rendered as adjacent headings differing only in capitalisation.
  *
- * Unlabeled fuzzy memories get a key derived from their precision, so the
+ * Unlabelled fuzzy memories get a key derived from their precision, so the
  * 1980s section collects every decade memory whether or not it was labelled,
  * and a range groups by its year span rather than by its raw start date.
  */
 export function timelineGroupKey(memory: DatedMemory): string {
   if (memory.date_label) {
-    // Strip a trailing parenthetical so labelled variants merge.
-    const base = memory.date_label.replace(/\s*\([^)]*\)\s*$/, "").trim();
+    const base = memory.date_label
+      .replace(/\s*\([^)]*\)\s*$/, "")
+      .replace(/\s+/g, " ")
+      .trim()
+      .toLowerCase();
     if (base) return base;
   }
 
@@ -91,6 +95,50 @@ export function timelineGroupKey(memory: DatedMemory): string {
   }
 
   return new Date(memory.created_at).toLocaleDateString();
+}
+
+/**
+ * Pick the heading to show for a group.
+ *
+ * Prefers a user/agent label (the human wording) over a derived date key, and
+ * when several label spellings are present chooses the most common one so the
+ * heading is stable rather than depending on sort order.
+ */
+export function timelineGroupHeading(items: DatedMemory[]): string {
+  const labels = items
+    .map((m) => (m.date_label || "").trim())
+    .filter((label) => label.length > 0);
+
+  if (labels.length > 0) {
+    const counts = new Map<string, number>();
+    for (const label of labels) {
+      counts.set(label, (counts.get(label) || 0) + 1);
+    }
+    // Most frequent wins; ties resolve to the first seen (insertion order).
+    let best = labels[0];
+    for (const [label, count] of counts) {
+      if (count > (counts.get(best) || 0)) best = label;
+    }
+    return best;
+  }
+
+  const first = items[0];
+  if (first.event_date) {
+    const start = new Date(first.event_date);
+    switch (first.date_precision) {
+      case "decade":
+        return `${Math.floor(start.getFullYear() / 10) * 10}s`;
+      case "year":
+        return String(start.getFullYear());
+      case "range":
+        return first.event_date_end
+          ? `${start.getFullYear()}–${new Date(first.event_date_end).getFullYear()}`
+          : `${Math.floor(start.getFullYear() / 10) * 10}s`;
+      default:
+        return start.toLocaleDateString();
+    }
+  }
+  return new Date(first.created_at).toLocaleDateString();
 }
 
 /** Whether the memory has any time information beyond its capture time. */

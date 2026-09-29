@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { Memory } from "./MemoryCard";
-import { formatMemoryDate, timelineGroupKey } from "@/lib/dates";
+import { timelineGroupHeading, timelineGroupKey } from "@/lib/dates";
 import Link from "next/link";
 
 export function Timeline() {
@@ -60,11 +60,7 @@ export function Timeline() {
       <div className="border-l-2 border-indigo-200 ml-3 space-y-6">
         {groupOrder.map((key) => {
           const items = byDate[key];
-          // Section heading: the group's own wording. For a merged label
-          // group, prefer the most descriptive (longest) label present.
-          const heading =
-            items.find((m) => m.date_label)?.date_label ||
-            formatMemoryDate(items[0]);
+          const heading = timelineGroupHeading(items);
 
           return (
             <div key={key} className="relative pl-6">
@@ -81,7 +77,9 @@ export function Timeline() {
                     </Link>
                     <p className="text-sm text-gray-500">
                       {isFuzzy(memory)
-                        ? memory.date_label && memory.date_label !== heading
+                        ? memory.date_label &&
+                          memory.date_label.trim().toLowerCase() !==
+                            heading.trim().toLowerCase()
                           ? memory.date_label
                           : "Approximate"
                         : memory.event_date
