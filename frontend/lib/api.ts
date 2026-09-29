@@ -162,6 +162,30 @@ async function request(
   return data;
 }
 
+export interface TellingSegment {
+  id: string;
+  ordinal: number;
+  text: string;
+  status: string;
+  title?: string | null;
+  summary?: string | null;
+  event_date?: string | null;
+  date_precision?: string | null;
+  date_label?: string | null;
+  memory_id?: string | null;
+}
+
+export interface Telling {
+  id: string;
+  raw_transcript: string;
+  input_type: string;
+  status: string;
+  error?: string | null;
+  frame_label?: string | null;
+  created_at: string;
+  segments: TellingSegment[];
+}
+
 export const api = {
   login: (username: string, password: string) =>
     request("POST", "/auth/login", { username, password }),
@@ -282,4 +306,22 @@ export const api = {
     request("POST", "/entities/merge", { source_id, target_id }),
   undoEntityMerge: (mergeId: string) =>
     request("POST", `/entities/merge/${mergeId}/undo`, {}),
+
+  getTelling: (id: string) =>
+    request("GET", `/tellings/${id}`) as Promise<Telling>,
+  updateTellingSegment: (
+    tellingId: string,
+    segmentId: string,
+    update: {
+      text?: string;
+      title?: string;
+      summary?: string;
+      status?: string;
+    }
+  ) =>
+    request(
+      "PATCH",
+      `/tellings/${tellingId}/segments/${segmentId}`,
+      update
+    ) as Promise<TellingSegment>,
 };
