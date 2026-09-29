@@ -580,6 +580,112 @@ async def count_entities_by_kind(
     return counts
 
 
+async def find_related_memories(
+    db: AsyncSession,
+    user_id: str,
+    memory_id: str,
+    limit: int = 5,
+    unlocked_ids: Iterable[str] = (),
+) -> list[tuple[Memory, list[str], int]]:
+    """Find memories that share first-class entities with this one.
+
+    Ranked by the number of shared entities, then by most recent. Returns
+    ``(memory, shared_entity_names, shared_count)``.
+
+    Derived on read rather than stored: this works retroactively (unlike the
+    old embedding-dependent ``related_memory_ids``), never goes stale, and is
+    explainable because the caller can show *why* two memories are related.
+
+    Locked memories are excluded in both directions: the source memory must be
+    visible for this to return anything, and locked candidates are omitted.
+    """
+    unlocked = {str(i) for i in unlocked_ids}
+
+    # The source must exist, belong to the user, and be visible.
+    source_result = await db.execute(
+        select(Memory)
+        .where(Memory.id == memory_id)
+        .where(Memory.user_id == user_id)
+    )
+    source = source_result.scalars().first()
+    if source is None:
+        return []
+    if source.is_private and str(source.id) not in unlocked:
+        return []
+
+    source_entities = {
+        str(row)
+        for row in (
+            await db.execute(
+                select(MemoryEntity.entity_id).where(
+                    MemoryEntity.memory_id == memory_id
+                )
+            )
+        ).scalars().all()
+    }
+    if not source_entities:
+        return []
+
+    conditions = _visible_mention_filter(user_id, unlocked)
+
+    # Count, per candidate memory, how many of the source's entities it shares.
+    shared_rows = await db.execute(
+        select(
+            MemoryEntity.memory_id,
+            Entity.canonical_name,
+        )
+        .join(Entity, Entity.id == MemoryEntity.entity_id)
+        .join(Memory, Memory.id == MemoryEntity.memory_id)
+        .where(MemoryEntity.entity_id.in_(source_entities))
+        .where(MemoryEntity.memory_id != memory_id)
+        .where(*conditions)
+    )
+
+    grouped: dict[str, list[str]] = {}
+    for candidate_id, entity_name in shared_rows.all():
+        grouped.setdefault(str(candidate_id), [])
+        if entity_name not in grouped[str(candidate_id)]:
+            grouped[str(candidate_id)].append(entity_name)
+
+    if not grouped:
+        return []
+
+    candidate_ids = list(grouped.keys())
+    memories_result = await db.execute(
+        select(Memory).where(Memory.id.in_(candidate_ids))
+    )
+    memories_by_id = {str(m.id): m for m in memories_result.scalars().all()}
+
+    ranked = []
+    for candidate_id, names in grouped.items():
+        memory = memories_by_id.get(candidate_id)
+        if memory is None:
+            continue
+        ranked.append((memory, sorted(names), len(names)))
+
+    # Most shared entities first, then most recent as a tiebreak.
+    ranked.sort(
+        key=lambda item: (
+            -item[2],
+            -(as_utc_or_min(item[0].event_date, item[0].created_at).timestamp()),
+        )
+    )
+    return ranked[:limit]
+
+
+def as_utc_or_min(event_date, created_at):
+    """Sort helper: prefer the event date, falling back to creation time."""
+    from app.db.datetime_utils import as_utc
+
+    value = event_date or created_at
+    normalized = as_utc(value)
+    if normalized is None:
+        from datetime import datetime, timezone
+
+        return datetime.min.replace(tzinfo=timezone.utc)
+    return normalized
+
+
 # ---------------------------------------------------------------------------
 # Merging
 #

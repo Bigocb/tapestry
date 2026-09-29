@@ -513,6 +513,32 @@ class EntityMergeSuggestion(BaseModel):
 
 
 # ============================================================================
+# RELATED MEMORY MODELS
+# ============================================================================
+
+
+class RelatedMemory(BaseModel):
+    """A memory that shares entities with another, and what is shared."""
+
+    id: UUID
+    title: Optional[str] = None
+    summary: Optional[str] = None
+    event_date: Optional[datetime] = None
+    date_precision: Optional[str] = None
+    date_label: Optional[str] = None
+    created_at: datetime
+    shared_entities: List[str] = Field(default_factory=list)
+    shared_count: int = 0
+
+
+class RelatedMemoriesResponse(BaseModel):
+    """Related memories for one memory."""
+
+    items: List[RelatedMemory]
+    total: int
+
+
+# ============================================================================
 # JOB STATUS MODELS
 # ============================================================================
 

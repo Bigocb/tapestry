@@ -35,6 +35,8 @@ from app.models.schemas import (
     MemoryTextCapture,
     MemoryFormCapture,
     MemoryUpdate,
+    RelatedMemoriesResponse,
+    RelatedMemory,
     SearchFilters,
     SearchQuery,
     SearchResponse,
@@ -44,6 +46,7 @@ from app.dependencies import get_current_user
 from app.privacy import LOCKED_SUMMARY, LOCKED_TITLE, get_unlocked_memory_ids, is_locked
 from app.db.entities import (
     entity_ids_for_memory,
+    find_related_memories,
     recompute_entity_stats,
     sync_memory_entities,
 )
@@ -674,6 +677,72 @@ async def search_memories_natural(
     search_query.limit = max(1, min(100, limit))
     search_query.offset = max(0, offset)
     return await _search_memories(db, str(current_user.id), search_query, unlocked_ids)
+
+
+@router.get(
+    "/memories/{memory_id}/related",
+    response_model=RelatedMemoriesResponse,
+    summary="Memories related to this one",
+    description=(
+        "Memories that share people, places or organizations with this memory, "
+        "most-shared first. Derived from entity mentions, so it works "
+        "retroactively and explains itself. Locked memories are excluded in "
+        "both directions; 404 if the memory itself is locked or not yours."
+    ),
+)
+async def get_related_memories(
+    memory_id: UUID,
+    limit: int = 5,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    unlocked_ids: set[str] = Depends(get_unlocked_memory_ids),
+) -> RelatedMemoriesResponse:
+    """Return memories sharing entities with this one."""
+    # Confirm ownership and visibility first, so a locked memory's
+    # relationships are not discoverable.
+    stmt = (
+        select(Memory)
+        .where(Memory.id == str(memory_id))
+        .where(Memory.user_id == current_user.id)
+    )
+    memory = (await db.execute(stmt)).scalars().first()
+    if memory is None or is_locked(memory, unlocked_ids):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Memory not found",
+        )
+
+    if limit < 1:
+        limit = 1
+    if limit > 50:
+        limit = 50
+
+    related = await find_related_memories(
+        db, str(current_user.id), str(memory_id), limit=limit, unlocked_ids=unlocked_ids
+    )
+
+    items = []
+    for other, shared, count in related:
+        content = (
+            other.structured_content
+            if isinstance(other.structured_content, dict)
+            else {}
+        )
+        items.append(
+            RelatedMemory(
+                id=other.id,
+                title=content.get("title"),
+                summary=content.get("summary"),
+                event_date=other.event_date,
+                date_precision=other.date_precision,
+                date_label=other.date_label,
+                created_at=other.created_at,
+                shared_entities=shared,
+                shared_count=count,
+            )
+        )
+
+    return RelatedMemoriesResponse(items=items, total=len(items))
 
 
 @router.get(

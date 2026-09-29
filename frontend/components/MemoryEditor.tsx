@@ -2,9 +2,20 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { api } from "@/lib/api";
 import { usePrivacy } from "@/lib/privacy";
 import { Memory } from "./MemoryCard";
+
+interface RelatedMemory {
+  id: string;
+  title?: string;
+  summary?: string;
+  event_date?: string;
+  date_label?: string;
+  shared_entities: string[];
+  shared_count: number;
+}
 
 export function MemoryEditor({ id }: { id: string }) {
   const router = useRouter();
@@ -17,6 +28,7 @@ export function MemoryEditor({ id }: { id: string }) {
   const [togglingLock, setTogglingLock] = useState(false);
   // "exact" shows a date picker; "fuzzy" shows period fields (label + range).
   const [whenMode, setWhenMode] = useState<"exact" | "fuzzy">("exact");
+  const [related, setRelated] = useState<RelatedMemory[]>([]);
 
   // Fetch and apply, setting state only from async callbacks. Calling setState
   // synchronously inside an effect triggers cascading renders (and is flagged
@@ -44,6 +56,14 @@ export function MemoryEditor({ id }: { id: string }) {
         setLoading(false);
       });
 
+  // Related memories are derived from shared entities, so they are fetched
+  // separately and are additive -- a failure here must not break the editor.
+  const fetchRelated = () =>
+    api
+      .getRelatedMemories(id)
+      .then((data) => setRelated(data?.items ?? []))
+      .catch(() => setRelated([]));
+
   const reload = () => {
     setLoading(true);
     fetchMemory();
@@ -51,6 +71,7 @@ export function MemoryEditor({ id }: { id: string }) {
 
   useEffect(() => {
     fetchMemory();
+    fetchRelated();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
@@ -453,6 +474,30 @@ export function MemoryEditor({ id }: { id: string }) {
           </button>
         )}
       </section>
+
+      {related.length > 0 && (
+        <section className="border rounded p-4 space-y-2">
+          <h2 className="font-semibold text-gray-800">Related memories</h2>
+          <p className="text-xs text-gray-500">
+            These share people or places with this memory.
+          </p>
+          <ul className="space-y-2">
+            {related.map((item) => (
+              <li key={item.id} className="border rounded p-3 bg-gray-50">
+                <Link
+                  href={`/memories/${item.id}`}
+                  className="font-medium hover:text-indigo-600"
+                >
+                  {item.title || item.summary || "Untitled memory"}
+                </Link>
+                <p className="text-xs text-gray-500 mt-1">
+                  shares {item.shared_entities.join(", ")}
+                </p>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
 
       <div className="flex gap-3">
         <button

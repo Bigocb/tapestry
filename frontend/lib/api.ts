@@ -234,6 +234,8 @@ export const api = {
     order?: string;
   }) => request("GET", "/timeline", undefined, params),
   getMemory: (id: string) => request("GET", `/memories/${id}`),
+  getRelatedMemories: (id: string, limit = 5) =>
+    request("GET", `/memories/${id}/related`, undefined, { limit }),
   updateMemory: (
     id: string,
     update: {
