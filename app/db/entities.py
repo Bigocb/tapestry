@@ -20,7 +20,7 @@ from typing import Iterable, Optional, Sequence
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import Entity, EntityAlias, MemoryEntity
+from app.db.models import Entity, EntityAlias, Memory, MemoryEntity
 
 # Only these become first-class entities. Dates are handled by event_date;
 # event/concept stay in structured_content JSON.
@@ -271,3 +271,149 @@ async def apply_mentions(
         await _recompute_mention_stats(db, entity)
 
     return touched
+
+
+# ---------------------------------------------------------------------------
+# Read path
+#
+# Privacy is derived, never stored on the entity: a person is only as visible
+# as the memories that mention them. Every read below therefore joins through
+# ``memories`` and excludes locked ones, so an entity that appears solely in
+# private memories cannot leak via a list, a count, or a direct fetch.
+# ---------------------------------------------------------------------------
+
+
+def _visible_mention_filter(user_id: str, unlocked_ids: Iterable[str]):
+    """SQLAlchemy conditions identifying a *visible* mention.
+
+    A mention is visible when its memory is not private, or is private but
+    unlocked for this session.
+    """
+    unlocked = {str(i) for i in unlocked_ids}
+    conditions = [MemoryEntity.user_id == user_id]
+
+    if unlocked:
+        conditions.append(
+            (Memory.is_private.is_(False)) | (MemoryEntity.memory_id.in_(unlocked))
+        )
+    else:
+        conditions.append(Memory.is_private.is_(False))
+
+    return conditions
+
+
+async def list_entities(
+    db: AsyncSession,
+    user_id: str,
+    kind: Optional[str] = None,
+    limit: int = 50,
+    offset: int = 0,
+    unlocked_ids: Iterable[str] = (),
+) -> tuple[list[tuple[Entity, int]], int]:
+    """Return visible entities with their visible mention counts.
+
+    The count is computed per query rather than read from the denormalized
+    column, because the stored count includes locked memories.
+    """
+    conditions = _visible_mention_filter(user_id, unlocked_ids)
+
+    base = (
+        select(Entity, func.count(MemoryEntity.id).label("visible_count"))
+        .join(MemoryEntity, MemoryEntity.entity_id == Entity.id)
+        .join(Memory, Memory.id == MemoryEntity.memory_id)
+        .where(Entity.user_id == user_id)
+        .where(Entity.merged_into_id.is_(None))
+        .where(*conditions)
+        .group_by(Entity.id)
+    )
+    if kind:
+        base = base.where(Entity.kind == kind)
+
+    count_result = await db.execute(
+        select(func.count()).select_from(base.subquery())
+    )
+    total = int(count_result.scalar_one())
+
+    stmt = (
+        base.order_by(
+            func.count(MemoryEntity.id).desc(),
+            Entity.canonical_name.asc(),
+            Entity.id,
+        )
+        .limit(limit)
+        .offset(offset)
+    )
+    result = await db.execute(stmt)
+    rows = [(entity, int(count)) for entity, count in result.all()]
+    return rows, total
+
+
+async def get_entity_detail(
+    db: AsyncSession,
+    user_id: str,
+    entity_id: str,
+    unlocked_ids: Iterable[str] = (),
+) -> Optional[tuple[Entity, int, list[str], list[tuple[MemoryEntity, Memory]]]]:
+    """Return an entity plus aliases and *visible* mentioning memories.
+
+    Returns None when the entity does not exist for this user or is visible
+    nowhere (i.e. every mentioning memory is locked), so it cannot be reached
+    by guessing an id.
+    """
+    result = await db.execute(
+        select(Entity)
+        .where(Entity.id == entity_id)
+        .where(Entity.user_id == user_id)
+        .where(Entity.merged_into_id.is_(None))
+    )
+    entity = result.scalars().first()
+    if entity is None:
+        return None
+
+    conditions = _visible_mention_filter(user_id, unlocked_ids)
+    mention_result = await db.execute(
+        select(MemoryEntity, Memory)
+        .join(Memory, Memory.id == MemoryEntity.memory_id)
+        .where(MemoryEntity.entity_id == entity.id)
+        .where(*conditions)
+        .order_by(Memory.event_date.desc().nullslast(), Memory.created_at.desc())
+    )
+    rows = [(mention, memory) for mention, memory in mention_result.all()]
+
+    if not rows:
+        # Mentioned only in locked memories: treat as not found.
+        return None
+
+    alias_result = await db.execute(
+        select(EntityAlias.alias)
+        .where(EntityAlias.entity_id == entity.id)
+        .order_by(EntityAlias.alias.asc())
+    )
+    aliases = [alias for alias in alias_result.scalars().all()]
+
+    return entity, len(rows), aliases, rows
+
+
+async def count_entities_by_kind(
+    db: AsyncSession,
+    user_id: str,
+    unlocked_ids: Iterable[str] = (),
+) -> dict[str, int]:
+    """Count visible entities per kind, for nav badges."""
+    conditions = _visible_mention_filter(user_id, unlocked_ids)
+
+    stmt = (
+        select(Entity.kind, func.count(func.distinct(Entity.id)))
+        .join(MemoryEntity, MemoryEntity.entity_id == Entity.id)
+        .join(Memory, Memory.id == MemoryEntity.memory_id)
+        .where(Entity.user_id == user_id)
+        .where(Entity.merged_into_id.is_(None))
+        .where(*conditions)
+        .group_by(Entity.kind)
+    )
+    result = await db.execute(stmt)
+
+    counts = {kind: 0 for kind in FIRST_CLASS_KINDS}
+    for kind, count in result.all():
+        counts[str(kind)] = int(count)
+    return counts

@@ -12,7 +12,16 @@ from sqlalchemy import inspect, text
 from datetime import timezone
 
 # Import routes
-from app.routes import auth, memories, stories, wiki, timeline, insights, review
+from app.routes import (
+    auth,
+    memories,
+    stories,
+    wiki,
+    timeline,
+    insights,
+    review,
+    entities,
+)
 from app.jobs.scheduler import scheduler
 from app.db import Base, engine
 from app.agents.capture import _ollama_config, _extract_event_date
@@ -384,6 +393,7 @@ app.include_router(stories.router, prefix="/api", tags=["stories"])
 app.include_router(timeline.router, prefix="/api", tags=["timeline"])
 app.include_router(insights.router, prefix="/api", tags=["insights"])
 app.include_router(review.router, prefix="/api", tags=["review"])
+app.include_router(entities.router, prefix="/api", tags=["entities"])
 app.include_router(wiki.router, prefix="/api", tags=["wiki"])
 
 

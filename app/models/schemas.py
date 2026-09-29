@@ -434,6 +434,60 @@ class ReviewQueueResponse(BaseModel):
 
 
 # ============================================================================
+# ENTITY READ MODELS (first-class people/places/organizations)
+# ============================================================================
+
+
+class EntitySummary(BaseModel):
+    """An entity as shown in a list (people/places browse)."""
+
+    id: UUID
+    kind: str  # 'person' | 'place' | 'organization'
+    canonical_name: str
+    description: Optional[str] = None
+    attributes: Optional[dict] = None
+    parent_entity_id: Optional[UUID] = None
+    # Number of *visible* (unlocked) memories mentioning this entity.
+    mention_count: int = 0
+    first_seen_at: Optional[datetime] = None
+    last_seen_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class EntityListResponse(BaseModel):
+    """A page of entities."""
+
+    items: List[EntitySummary]
+    total: int
+    limit: int
+    offset: int
+
+
+class EntityMemoryRef(BaseModel):
+    """A memory that mentions an entity, as listed on the entity page."""
+
+    id: UUID
+    title: Optional[str] = None
+    summary: Optional[str] = None
+    role: Optional[str] = Field(
+        None, description="How the entity was referred to in this memory"
+    )
+    event_date: Optional[datetime] = None
+    date_precision: Optional[str] = None
+    date_label: Optional[str] = None
+    created_at: datetime
+
+
+class EntityDetail(EntitySummary):
+    """Full entity, including every spelling and the memories mentioning it."""
+
+    aliases: List[str] = Field(default_factory=list)
+    memories: List[EntityMemoryRef] = Field(default_factory=list)
+
+
+# ============================================================================
 # JOB STATUS MODELS
 # ============================================================================
 
