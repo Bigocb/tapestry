@@ -175,6 +175,17 @@ export interface TellingSegment {
   memory_id?: string | null;
 }
 
+export interface TellingSegmentUpdate {
+  text?: string;
+  title?: string;
+  summary?: string;
+  status?: string;
+  event_date?: string | null;
+  event_date_end?: string | null;
+  date_precision?: string | null;
+  date_label?: string | null;
+}
+
 export interface Telling {
   id: string;
   raw_transcript: string;
@@ -324,12 +335,7 @@ export const api = {
   updateTellingSegment: (
     tellingId: string,
     segmentId: string,
-    update: {
-      text?: string;
-      title?: string;
-      summary?: string;
-      status?: string;
-    }
+    update: TellingSegmentUpdate
   ) =>
     request(
       "PATCH",

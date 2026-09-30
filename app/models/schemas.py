@@ -602,12 +602,24 @@ class TellingSegmentResponse(BaseModel):
 
 
 class TellingSegmentUpdate(BaseModel):
-    """Edits to a proposed segment, applied before it is committed."""
+    """Edits to a proposed segment, applied before it is committed.
+
+    A resolved date is the cursor's best answer, not the last word, so the user
+    can correct it. Only fields actually sent are applied — an explicit null
+    clears one, and an omitted field is left alone.
+    """
+
+    model_config = ConfigDict(extra="forbid")
 
     text: Optional[str] = Field(None, min_length=1, max_length=20000)
     title: Optional[str] = Field(None, max_length=255)
     summary: Optional[str] = None
     status: Optional[str] = None
+
+    event_date: Optional[datetime] = None
+    event_date_end: Optional[datetime] = None
+    date_precision: Optional[str] = None
+    date_label: Optional[str] = Field(None, max_length=120)
 
 
 class TellingResponse(BaseModel):

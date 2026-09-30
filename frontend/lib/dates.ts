@@ -1,11 +1,13 @@
 "use client";
 
 export interface DatedMemory {
-  created_at: string;
-  event_date?: string;
-  date_precision?: string;
-  event_date_end?: string;
-  date_label?: string;
+  // Optional because a telling segment has no capture time of its own, and
+  // nullable because a segment's dates are explicitly cleared, not just absent.
+  created_at?: string;
+  event_date?: string | null;
+  date_precision?: string | null;
+  event_date_end?: string | null;
+  date_label?: string | null;
 }
 
 /**
@@ -44,8 +46,11 @@ export function formatMemoryDate(memory: DatedMemory): string {
     }
   }
 
-  // No event date: fall back to when it was captured.
-  return new Date(memory.created_at).toLocaleDateString();
+  // No event date: fall back to when it was captured, if that is even known.
+  // Callers pass "" on rather than inventing a date for an undated draft.
+  return memory.created_at
+    ? new Date(memory.created_at).toLocaleDateString()
+    : "";
 }
 
 /**
@@ -94,7 +99,10 @@ export function timelineGroupKey(memory: DatedMemory): string {
     }
   }
 
-  return new Date(memory.created_at).toLocaleDateString();
+  // No date to key by, and a telling segment has no capture time at all.
+  return memory.created_at
+    ? new Date(memory.created_at).toLocaleDateString()
+    : "";
 }
 
 /**
@@ -138,7 +146,11 @@ export function timelineGroupHeading(items: DatedMemory[]): string {
         return start.toLocaleDateString();
     }
   }
-  return new Date(first.created_at).toLocaleDateString();
+  // Memories always carry a capture time; a caller without one gets no
+  // heading rather than a date built out of undefined.
+  return first.created_at
+    ? new Date(first.created_at).toLocaleDateString()
+    : "";
 }
 
 /** Whether the memory has any time information beyond its capture time. */

@@ -185,6 +185,62 @@ class TestSegmentedCapture:
         ]
 
 
+class TestSegmentDates:
+    """A resolved date is the cursor's best answer, not the last word."""
+
+    async def test_a_segment_date_can_be_corrected(
+        self, client, setup_users, get_auth_token, fake_segmentation
+    ):
+        await setup_users()
+        token = get_auth_token("alice", "password123")
+
+        draft = client.post(
+            "/api/tellings",
+            json={"raw_transcript": TRANSCRIPT},
+            headers=_auth(token),
+        ).json()
+        segment_id = draft["segments"][0]["id"]
+
+        response = client.patch(
+            f"/api/tellings/{draft['id']}/segments/{segment_id}",
+            json={
+                "event_date": "1985-07-01T00:00:00",
+                "date_precision": "year",
+                "date_label": None,
+            },
+            headers=_auth(token),
+        )
+
+        assert response.status_code == 200
+        assert response.json()["date_precision"] == "year"
+
+        fetched = client.get(
+            f"/api/tellings/{draft['id']}", headers=_auth(token)
+        ).json()
+        assert fetched["segments"][0]["event_date"].startswith("1985-07-01")
+
+    async def test_an_unknown_date_precision_is_rejected(
+        self, client, setup_users, get_auth_token, fake_segmentation
+    ):
+        await setup_users()
+        token = get_auth_token("alice", "password123")
+
+        draft = client.post(
+            "/api/tellings",
+            json={"raw_transcript": TRANSCRIPT},
+            headers=_auth(token),
+        ).json()
+        segment_id = draft["segments"][0]["id"]
+
+        response = client.patch(
+            f"/api/tellings/{draft['id']}/segments/{segment_id}",
+            json={"date_precision": "whenever"},
+            headers=_auth(token),
+        )
+
+        assert response.status_code == 400
+
+
 class TestCaptureTelling:
     """Tellings are submitted and come back as a reviewable draft."""
 

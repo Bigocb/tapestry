@@ -2,7 +2,16 @@
 
 import { useEffect, useState } from "react";
 
-import { api, type Telling, type TellingSegment } from "@/lib/api";
+import {
+  api,
+  type Telling,
+  type TellingSegment,
+  type TellingSegmentUpdate,
+} from "@/lib/api";
+import { formatMemoryDate } from "@/lib/dates";
+
+// A fuzzy period is a real answer, so precision is the user's to choose.
+const PRECISIONS = ["exact", "month", "year", "decade"];
 
 export function TellingReview({ tellingId }: { tellingId: string }) {
   const [telling, setTelling] = useState<Telling | null>(null);
@@ -120,10 +129,40 @@ function SegmentCard({
   const [title, setTitle] = useState(segment.title ?? "");
   const [saving, setSaving] = useState(false);
 
+  const initialDate = segment.event_date ? segment.event_date.slice(0, 10) : "";
+  const initialPrecision = PRECISIONS.includes(segment.date_precision ?? "")
+    ? (segment.date_precision as string)
+    : "exact";
+  const [date, setDate] = useState(initialDate);
+  const [precision, setPrecision] = useState(initialPrecision);
+
+  function edits(): TellingSegmentUpdate {
+    const update: TellingSegmentUpdate = { title };
+
+    // Only send dates the user actually changed. Sending them unconditionally
+    // would clear a fuzzy label nobody touched.
+    if (date !== initialDate || precision !== initialPrecision) {
+      if (date) {
+        update.event_date = `${date}T00:00:00`;
+        update.date_precision = precision;
+        // An explicit date replaces whatever wording described the old one.
+        update.date_label = null;
+      } else {
+        update.event_date = null;
+        update.date_precision = "unknown";
+        update.date_label = null;
+      }
+    }
+
+    return update;
+  }
+
   async function save() {
     setSaving(true);
     try {
-      onSaved(await api.updateTellingSegment(tellingId, segment.id, { title }));
+      onSaved(
+        await api.updateTellingSegment(tellingId, segment.id, edits())
+      );
     } finally {
       setSaving(false);
     }
@@ -150,6 +189,9 @@ function SegmentCard({
       }`}
     >
       <h3 className="font-semibold">{segment.title}</h3>
+      <p className="text-sm text-gray-500">
+        {formatMemoryDate(segment) || "No date"}
+      </p>
       <p className="text-sm text-gray-600">{segment.text}</p>
       {segment.status === "rejected" ? (
         <p className="text-sm text-amber-700">
@@ -164,6 +206,31 @@ function SegmentCard({
           onChange={(event) => setTitle(event.target.value)}
         />
       </label>
+      <div className="flex flex-wrap items-end gap-3">
+        <label className="block">
+          <span className="block text-sm font-medium mb-1">Date</span>
+          <input
+            type="date"
+            className="border rounded p-2"
+            value={date}
+            onChange={(event) => setDate(event.target.value)}
+          />
+        </label>
+        <label className="block">
+          <span className="block text-sm font-medium mb-1">Precision</span>
+          <select
+            className="border rounded p-2"
+            value={precision}
+            onChange={(event) => setPrecision(event.target.value)}
+          >
+            {PRECISIONS.map((option) => (
+              <option key={option} value={option}>
+                {option}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
       <div className="flex gap-2">
         <button
           type="button"

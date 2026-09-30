@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -143,5 +143,135 @@ describe("TellingReview", () => {
 
     expect(api.commitTelling).toHaveBeenCalledWith("t1");
     expect(await screen.findByText(/1 memory created/i)).toBeInTheDocument();
+  });
+});
+
+describe("TellingReview dates", () => {
+  beforeEach(() => {
+    vi.mocked(api.getTelling).mockResolvedValue(
+      telling({
+        segments: [
+          {
+            id: "s1",
+            ordinal: 0,
+            text: "First memory.",
+            status: "proposed",
+            title: "Labelled",
+            date_label: "first month in high school",
+          },
+          {
+            id: "s2",
+            ordinal: 1,
+            text: "Second memory.",
+            status: "proposed",
+            title: "Resolved from the cursor",
+            event_date: "2003-08-01T00:00:00",
+            date_precision: "month",
+          },
+          {
+            id: "s3",
+            ordinal: 2,
+            text: "Third memory.",
+            status: "proposed",
+            title: "Undated",
+          },
+        ],
+      })
+    );
+  });
+
+  it("shows each segment's resolved date, and says so when there is none", async () => {
+    render(<TellingReview tellingId="t1" />);
+    const cards = await screen.findAllByTestId("telling-segment");
+
+    // A fuzzy period is shown in the account's own words.
+    expect(
+      within(cards[0]).getByText("first month in high school")
+    ).toBeInTheDocument();
+    // The year is locale-independent, unlike the month name.
+    expect(within(cards[1]).getByText(/2003/)).toBeInTheDocument();
+    // Silence would hide a draft the user still needs to date.
+    expect(within(cards[2]).getByText("No date")).toBeInTheDocument();
+  });
+});
+
+describe("TellingReview date correction", () => {
+  beforeEach(() => {
+    vi.mocked(api.getTelling).mockResolvedValue(
+      telling({
+        segments: [
+          {
+            id: "s1",
+            ordinal: 0,
+            text: "In August 2003 I started high school.",
+            status: "proposed",
+            title: "Trip to Florida",
+            event_date: "2003-08-01T00:00:00",
+            date_precision: "month",
+          },
+        ],
+      })
+    );
+  });
+
+  it("saves a corrected date and precision", async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.updateTellingSegment).mockResolvedValue({
+      id: "s1",
+      ordinal: 0,
+      text: "In August 2003 I started high school.",
+      status: "proposed",
+      title: "Trip to Florida",
+      event_date: "1985-07-01T00:00:00",
+      date_precision: "year",
+    });
+
+    render(<TellingReview tellingId="t1" />);
+    const cards = await screen.findAllByTestId("telling-segment");
+    const card = within(cards[0]);
+
+    // fireEvent rather than userEvent: jsdom's date input does not accept
+    // typed characters the way a real one does.
+    fireEvent.change(card.getByLabelText("Date"), {
+      target: { value: "1985-07-01" },
+    });
+    fireEvent.change(card.getByLabelText("Precision"), {
+      target: { value: "year" },
+    });
+    await user.click(card.getByRole("button", { name: "Save" }));
+
+    expect(api.updateTellingSegment).toHaveBeenCalledWith("t1", "s1", {
+      title: "Trip to Florida",
+      event_date: "1985-07-01T00:00:00",
+      date_precision: "year",
+      date_label: null,
+    });
+  });
+
+  it("leaves the date untouched when only the title changes", async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.updateTellingSegment).mockResolvedValue({
+      id: "s1",
+      ordinal: 0,
+      text: "In August 2003 I started high school.",
+      status: "proposed",
+      title: "Renamed",
+      event_date: "2003-08-01T00:00:00",
+      date_precision: "month",
+    });
+
+    render(<TellingReview tellingId="t1" />);
+    const cards = await screen.findAllByTestId("telling-segment");
+    const card = within(cards[0]);
+
+    const titleInput = card.getByLabelText("Title");
+    await user.clear(titleInput);
+    await user.type(titleInput, "Renamed");
+    await user.click(card.getByRole("button", { name: "Save" }));
+
+    // Sending dates here would wipe a fuzzy label the user never touched.
+    expect(api.updateTellingSegment).toHaveBeenCalledWith("t1", "s1", {
+      title: "Renamed",
+    });
   });
 });

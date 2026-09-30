@@ -32,6 +32,10 @@ ACCEPTED = "accepted"
 REJECTED = "rejected"
 SEGMENT_STATUSES = {PROPOSED, ACCEPTED, REJECTED}
 
+# Mirrors ResolvedDate.precision. A fuzzy period is a real answer, so these are
+# all legitimate values for a user to set by hand.
+DATE_PRECISIONS = {"exact", "month", "year", "decade", "range", "unknown"}
+
 DRAFT = "draft"
 COMMITTED = "committed"
 
@@ -220,6 +224,14 @@ async def update_segment(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"status must be one of {sorted(SEGMENT_STATUSES)}",
         )
+    if (
+        payload.date_precision is not None
+        and payload.date_precision not in DATE_PRECISIONS
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"date_precision must be one of {sorted(DATE_PRECISIONS)}",
+        )
 
     telling = await _load_telling(db, current_user.id, telling_id)
     segment = next((item for item in telling.segments if item.id == segment_id), None)
@@ -232,6 +244,14 @@ async def update_segment(
         segment.text = payload.text
     if payload.status is not None:
         segment.status = payload.status
+
+    # Dates go through model_fields_set so an explicit null clears a field while
+    # an omitted one is left alone — the difference between "no date" and "I did
+    # not touch the date".
+    provided = payload.model_fields_set
+    for field in ("event_date", "event_date_end", "date_precision", "date_label"):
+        if field in provided:
+            setattr(segment, field, getattr(payload, field))
 
     # Reassign rather than mutate: in-place JSON changes are not detected.
     content = dict(segment.structured_content or {})
