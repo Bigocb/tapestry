@@ -18,8 +18,10 @@ from app.db.entities import (
     get_entity_detail,
     list_entities,
     merge_entities,
+    split_entity,
     suggest_merges,
     undo_merge,
+    undo_split,
 )
 from app.dependencies import get_current_user
 from app.models.schemas import (
@@ -29,6 +31,8 @@ from app.models.schemas import (
     EntityMergeRequest,
     EntityMergeResponse,
     EntityMergeSuggestion,
+    EntitySplitRequest,
+    EntitySplitResponse,
     EntitySummary,
 )
 from app.privacy import get_unlocked_memory_ids
@@ -205,6 +209,67 @@ async def undo_merge_endpoint(
 
 # Declared last on purpose: this path would otherwise capture the static routes
 # above ("/entities/counts", "/entities/merge", ...) as an entity id.
+@router.post(
+    "/entities/{entity_id}/split",
+    response_model=EntitySplitResponse,
+    summary="Split an entity",
+    description=(
+        "Move chosen mentions onto a new entity of the same kind. For when "
+        "extraction read two things as one — which no merge undo can reach."
+    ),
+)
+async def split_entity_endpoint(
+    entity_id: UUID,
+    request: EntitySplitRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> EntitySplitResponse:
+    """Pull some of an entity's memories out into a new entity."""
+    try:
+        split = await split_entity(
+            db,
+            str(current_user.id),
+            str(entity_id),
+            [str(mention_id) for mention_id in request.mention_ids],
+            request.name,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+        )
+
+    await db.commit()
+
+    return EntitySplitResponse(
+        split_id=split.id,
+        source_entity_id=split.source_entity_id,
+        new_entity_id=split.new_entity_id,
+        moved_mention_count=len(split.moved_mention_ids or []),
+    )
+
+
+@router.post(
+    "/entities/split/{split_id}/undo",
+    summary="Undo a split",
+    description="Restore the mentions that moved and drop the entity they moved to.",
+)
+async def undo_split_endpoint(
+    split_id: UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Reverse a previously applied split."""
+    try:
+        await undo_split(db, str(current_user.id), str(split_id))
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)
+        )
+
+    await db.commit()
+    return {"detail": "Split undone."}
+
+
 @router.get(
     "/entities/{entity_id}",
     response_model=EntityDetail,

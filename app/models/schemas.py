@@ -570,6 +570,24 @@ class ErrorResponse(BaseModel):
     status_code: int = 400
 
 
+class EntitySplitRequest(BaseModel):
+    """Move chosen mentions off an entity onto a new one of the same kind."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(..., min_length=1, max_length=255)
+    mention_ids: List[UUID] = Field(..., min_length=1)
+
+
+class EntitySplitResponse(BaseModel):
+    """What a split did, so the screen can refresh and offer an undo."""
+
+    split_id: UUID
+    source_entity_id: UUID
+    new_entity_id: UUID
+    moved_mention_count: int
+
+
 # ============================================================================
 # PASSWORD RESET MODELS
 # ============================================================================

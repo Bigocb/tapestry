@@ -324,6 +324,30 @@ class EntityMerge(Base):
     __table_args__ = (Index("idx_entity_merges_user", "user_id"),)
 
 
+class EntitySplit(Base):
+    """Audit record of a split, so it can be reversed exactly.
+
+    The counterpart to ``EntityMerge``. A merge is undone by moving recorded
+    rows back and clearing a tombstone; a split is undone by moving recorded
+    rows back and dropping the entity that only existed because of it.
+    """
+
+    __tablename__ = "entity_splits"
+
+    id = Column(GUID(), primary_key=True, default=uuid.uuid4)
+    user_id = Column(GUID(), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+
+    source_entity_id = Column(GUID(), nullable=False)
+    new_entity_id = Column(GUID(), nullable=False)
+
+    moved_mention_ids = Column(DBJSON(), default=list, nullable=False)
+    moved_alias_ids = Column(DBJSON(), default=list, nullable=False)
+
+    created_at = Column(TIMESTAMP, server_default=func.now(), nullable=False)
+
+    __table_args__ = (Index("idx_entity_splits_user", "user_id"),)
+
+
 class Story(Base):
     __tablename__ = "stories"
 

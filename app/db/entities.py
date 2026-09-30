@@ -20,7 +20,14 @@ from typing import Iterable, Optional, Sequence
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import Entity, EntityAlias, EntityMerge, Memory, MemoryEntity
+from app.db.models import (
+    Entity,
+    EntityAlias,
+    EntityMerge,
+    EntitySplit,
+    Memory,
+    MemoryEntity,
+)
 
 # Only these become first-class entities. Dates are handled by event_date;
 # event/concept stay in structured_content JSON.
@@ -835,6 +842,196 @@ async def undo_merge(
     await _recompute_mention_stats(db, target)
 
     return merge
+
+
+async def split_entity(
+    db: AsyncSession,
+    user_id: str,
+    entity_id: str,
+    mention_ids: Sequence[str],
+    new_name: str,
+) -> EntitySplit:
+    """Move chosen mentions off an entity onto a new one of the same kind.
+
+    For the damage a merge cannot cause and an undo cannot reach: mentions that
+    were never merged, but resolved to the same entity in the first place. Two
+    Daves read as one.
+
+    Raises ValueError when the split is not permitted: no mentions chosen, a
+    missing name, an unknown or already-merged entity, or a mention that does
+    not belong to it.
+    """
+    name = (new_name or "").strip()
+    if not name:
+        raise ValueError("A name is required for the new entity")
+
+    chosen = [str(value) for value in mention_ids]
+    if not chosen:
+        raise ValueError("Choose at least one memory to move")
+
+    source = await _load_owned_entity(db, user_id, entity_id)
+    if source is None:
+        raise ValueError("Entity not found")
+    if source.merged_into_id is not None:
+        raise ValueError("This entity has been merged; undo that first")
+
+    mentions = (
+        (
+            await db.execute(
+                select(MemoryEntity)
+                .where(MemoryEntity.id.in_(chosen))
+                .where(MemoryEntity.entity_id == source.id)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    if len(mentions) != len(set(chosen)):
+        raise ValueError("Some of those memories are not on this entity")
+
+    new_entity = Entity(
+        user_id=user_id,
+        kind=source.kind,
+        canonical_name=name,
+        normalized_name=normalize_name(name),
+        mention_count=0,
+    )
+    db.add(new_entity)
+    await db.flush()
+
+    for mention in mentions:
+        mention.entity_id = new_entity.id
+
+    # Sessions run with autoflush off, so the move above is invisible to the
+    # query below until it is flushed.
+    await db.flush()
+
+    # An alias is a way the name has been written, so it moves only when every
+    # mention that spelt it moved too. Otherwise the memories left behind would
+    # lose the spelling that reaches this entity.
+    remaining = (
+        (
+            await db.execute(
+                select(MemoryEntity).where(MemoryEntity.entity_id == source.id)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    moved_forms = {normalize_name(mention.surface_form) for mention in mentions}
+    kept_forms = {normalize_name(mention.surface_form) for mention in remaining}
+
+    aliases = (
+        (
+            await db.execute(
+                select(EntityAlias).where(EntityAlias.entity_id == source.id)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    moved_alias_ids = []
+    for alias in aliases:
+        if (
+            alias.normalized_alias in moved_forms
+            and alias.normalized_alias not in kept_forms
+        ):
+            alias.entity_id = new_entity.id
+            moved_alias_ids.append(str(alias.id))
+
+    # The chosen name has to resolve to the new entity, or the very next
+    # memory spelt that way would attach to the old one again.
+    normalised = normalize_name(name)
+    if await find_entity_by_alias(db, user_id, source.kind, normalised) is None:
+        db.add(
+            EntityAlias(
+                user_id=user_id,
+                entity_id=new_entity.id,
+                alias=name,
+                normalized_alias=normalised,
+                kind=source.kind,
+                source="user",
+            )
+        )
+
+    split = EntitySplit(
+        user_id=user_id,
+        source_entity_id=source.id,
+        new_entity_id=new_entity.id,
+        moved_mention_ids=[str(mention.id) for mention in mentions],
+        moved_alias_ids=moved_alias_ids,
+    )
+    db.add(split)
+    await db.flush()
+
+    await _recompute_mention_stats(db, source)
+    await _recompute_mention_stats(db, new_entity)
+
+    return split
+
+
+async def undo_split(
+    db: AsyncSession,
+    user_id: str,
+    split_id: str,
+) -> EntitySplit:
+    """Reverse a split, restoring exactly the rows that moved.
+
+    The new entity existed only because of the split, so it goes with it. The
+    audit record is deleted on success, so an undo cannot be replayed.
+    """
+    split = (
+        (
+            await db.execute(
+                select(EntitySplit)
+                .where(EntitySplit.id == split_id)
+                .where(EntitySplit.user_id == user_id)
+            )
+        )
+        .scalars()
+        .first()
+    )
+    if split is None:
+        raise ValueError("Split not found or already undone")
+
+    source = await _load_owned_entity(db, user_id, str(split.source_entity_id))
+    target = await _load_owned_entity(db, user_id, str(split.new_entity_id))
+    if source is None or target is None:
+        raise ValueError("Entity not found")
+
+    if split.moved_mention_ids:
+        moved = await db.execute(
+            select(MemoryEntity).where(MemoryEntity.id.in_(split.moved_mention_ids))
+        )
+        for mention in moved.scalars().all():
+            mention.entity_id = source.id
+
+    if split.moved_alias_ids:
+        aliases = await db.execute(
+            select(EntityAlias).where(EntityAlias.id.in_(split.moved_alias_ids))
+        )
+        for alias in aliases.scalars().all():
+            alias.entity_id = source.id
+
+    # Flush before deleting the new entity. Its relationship is cascade
+    # "all, delete-orphan", and without this the cascade reads a stale
+    # collection and deletes the mentions that were just moved back.
+    await db.flush()
+
+    # Anything still on the new entity arrived with the split.
+    orphans = await db.execute(
+        select(EntityAlias).where(EntityAlias.entity_id == target.id)
+    )
+    for alias in orphans.scalars().all():
+        await db.delete(alias)
+
+    await db.delete(target)
+    await db.delete(split)
+    await db.flush()
+
+    await _recompute_mention_stats(db, source)
+
+    return split
 
 
 async def suggest_merges(
