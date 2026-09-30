@@ -7,6 +7,8 @@ import { api, type Telling, type TellingSegment } from "@/lib/api";
 export function TellingReview({ tellingId }: { tellingId: string }) {
   const [telling, setTelling] = useState<Telling | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [result, setResult] = useState<string | null>(null);
+  const [committing, setCommitting] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -36,6 +38,20 @@ export function TellingReview({ tellingId }: { tellingId: string }) {
     );
   }
 
+  async function commit() {
+    setCommitting(true);
+    try {
+      const committed = await api.commitTelling(tellingId);
+      setTelling(committed);
+      const created = committed.segments.filter(
+        (segment) => segment.memory_id
+      ).length;
+      setResult(`${created} ${created === 1 ? "memory" : "memories"} created.`);
+    } finally {
+      setCommitting(false);
+    }
+  }
+
   if (error) return <p>{error}</p>;
   if (!telling) return <p>Loading…</p>;
 
@@ -56,6 +72,15 @@ export function TellingReview({ tellingId }: { tellingId: string }) {
             onSaved={replaceSegment}
           />
         ))}
+      </section>
+
+      <section>
+        {telling.status === "committed" ? null : (
+          <button type="button" onClick={commit} disabled={committing}>
+            Save these memories
+          </button>
+        )}
+        {result ? <p>{result}</p> : null}
       </section>
     </div>
   );
@@ -82,16 +107,35 @@ function SegmentCard({
     }
   }
 
+  async function reject() {
+    setSaving(true);
+    try {
+      onSaved(
+        await api.updateTellingSegment(tellingId, segment.id, {
+          status: "rejected",
+        })
+      );
+    } finally {
+      setSaving(false);
+    }
+  }
+
   return (
     <article data-testid="telling-segment">
       <h3>{segment.title}</h3>
       <p>{segment.text}</p>
+      {segment.status === "rejected" ? (
+        <p>Rejected — this will not become a memory.</p>
+      ) : null}
       <label>
         Title
         <input value={title} onChange={(event) => setTitle(event.target.value)} />
       </label>
       <button type="button" onClick={save} disabled={saving}>
         Save
+      </button>
+      <button type="button" onClick={reject} disabled={saving}>
+        Reject
       </button>
     </article>
   );

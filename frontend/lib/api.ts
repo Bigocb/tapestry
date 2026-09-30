@@ -307,6 +307,8 @@ export const api = {
   undoEntityMerge: (mergeId: string) =>
     request("POST", `/entities/merge/${mergeId}/undo`, {}),
 
+  createTelling: (raw_transcript: string) =>
+    request("POST", "/tellings", { raw_transcript }) as Promise<Telling>,
   getTelling: (id: string) =>
     request("GET", `/tellings/${id}`) as Promise<Telling>,
   updateTellingSegment: (
@@ -324,4 +326,6 @@ export const api = {
       `/tellings/${tellingId}/segments/${segmentId}`,
       update
     ) as Promise<TellingSegment>,
+  commitTelling: (id: string) =>
+    request("POST", `/tellings/${id}/commit`, {}) as Promise<Telling>,
 };

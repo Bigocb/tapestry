@@ -82,4 +82,66 @@ describe("TellingReview", () => {
       title: "Renamed",
     });
   });
+
+  it("rejects a segment and shows that it will be left out", async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.updateTellingSegment).mockResolvedValue({
+      id: "s2",
+      ordinal: 1,
+      text: "The next day we went to Disney.",
+      status: "rejected",
+      title: "Disney",
+    });
+
+    render(<TellingReview tellingId="t1" />);
+    const cards = await screen.findAllByTestId("telling-segment");
+
+    await user.click(within(cards[1]).getByRole("button", { name: "Reject" }));
+
+    expect(api.updateTellingSegment).toHaveBeenCalledWith("t1", "s2", {
+      status: "rejected",
+    });
+
+    const updated = await screen.findAllByTestId("telling-segment");
+    expect(
+      within(updated[1]).getByText(/will not become a memory/i)
+    ).toBeInTheDocument();
+  });
+
+  it("commits the split and reports how many memories it created", async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.commitTelling).mockResolvedValue(
+      telling({
+        status: "committed",
+        segments: [
+          {
+            id: "s1",
+            ordinal: 0,
+            text: "In the summer of 1985 we drove down to Florida.",
+            status: "accepted",
+            title: "Trip to Florida",
+            memory_id: "m1",
+          },
+          {
+            id: "s2",
+            ordinal: 1,
+            text: "The next day we went to Disney.",
+            status: "rejected",
+            title: "Disney",
+            memory_id: null,
+          },
+        ],
+      })
+    );
+
+    render(<TellingReview tellingId="t1" />);
+    await screen.findAllByTestId("telling-segment");
+
+    await user.click(
+      screen.getByRole("button", { name: /save these memories/i })
+    );
+
+    expect(api.commitTelling).toHaveBeenCalledWith("t1");
+    expect(await screen.findByText(/1 memory created/i)).toBeInTheDocument();
+  });
 });
