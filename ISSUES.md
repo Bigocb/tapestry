@@ -1408,9 +1408,46 @@ Not written yet. Brainstorm first.
 
 ---
 
+## PHASE 12: Timeline
+
+### Issue 39: Revisit the timeline structure
+
+**Type:** AFK
+**Blocked by:** None
+**User stories covered:** new — raised after using the timeline
+**Status:** placeholder. Brainstorm before this becomes work.
+
+#### What to build
+
+Not yet specified. The timeline groups memories by label and precision (Issue
+22, plus the grouping work that made labels case- and whitespace-insensitive),
+which was built to stop one period's memories scattering into a row each.
+
+Worth reconsidering now, because tellings change the shape of the data: a
+telling produces several memories about one period *by design*. A single
+telling can now account for most of a group, and the grouping rules were
+written before that was true.
+
+#### Open questions
+
+- does grouping by label still say the right thing when one telling supplies
+  most of a group
+- should a telling's memories be recognisable on the timeline as coming from
+  one account
+- is the decade/range fallback still doing useful work, or papering over dates
+  the cursor now resolves properly
+- what the timeline should do with a memory that inherited only a telling's
+  frame — a label, and no date at all
+
+#### Acceptance criteria
+
+Not written yet. Brainstorm first.
+
+---
+
 ## Summary
 
-**Total Issues:** 38  
+**Total Issues:** 39  
 **Vertical slices:** Organized in 8 build phases (Foundation → Infrastructure → Core Processing → Search → Management → Narrative → Timeline → Deployment), plus **Phase 9 (Tellings)** — Issues 28-36, cut as tracer bullets. Note also that the deployment target is no longer Render: MEMIND now runs on the homelab box behind Traefik and cloudflared at `memory.cloutier.work`, with Postgres.
 
 **Current status (2026-09-22):** 24 of 27 issues done; 3 partial (1, 4, 7) and 1 not started (27).
