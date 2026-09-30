@@ -622,6 +622,30 @@ class TellingSegmentUpdate(BaseModel):
     date_label: Optional[str] = Field(None, max_length=120)
 
 
+class TellingSegmentMerge(BaseModel):
+    """Segments to join into one. They must be adjacent."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    segment_ids: List[UUID] = Field(..., min_length=2)
+
+
+class TellingSegmentReorder(BaseModel):
+    """The segments in their new order. Must list each one exactly once."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    segment_ids: List[UUID] = Field(..., min_length=1)
+
+
+class TellingSegmentSplit(BaseModel):
+    """Where to cut a segment's text in two, as a character offset."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    at: int = Field(..., ge=1)
+
+
 class TellingResponse(BaseModel):
     """A telling together with its proposed split."""
 

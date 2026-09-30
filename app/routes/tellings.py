@@ -18,10 +18,16 @@ from app.db import get_db, Memory, Telling, TellingSegment, User
 from app.db.entities import sync_memory_entities
 from app.db.memory_writes import apply_memory_date_fields, apply_review_flags
 from app.dependencies import get_current_user
+from app.privacy import get_unlocked_memory_ids
+from app.routes.memories import _memory_response
 from app.models.schemas import (
+    MemoryResponse,
     TellingCreate,
     TellingResponse,
+    TellingSegmentMerge,
+    TellingSegmentReorder,
     TellingSegmentResponse,
+    TellingSegmentSplit,
     TellingSegmentUpdate,
 )
 
@@ -79,6 +85,10 @@ async def _load_telling(db: AsyncSession, user_id, telling_id) -> Telling:
         select(Telling)
         .where(Telling.id == telling_id, Telling.user_id == user_id)
         .options(selectinload(Telling.segments))
+        # Re-querying returns the identity-mapped object, whose segment
+        # collection is whatever was loaded last. After a merge or a delete
+        # that collection is stale, so force it to be rebuilt from the rows.
+        .execution_options(populate_existing=True)
     )
     telling = result.scalar_one_or_none()
     if telling is None:
@@ -154,6 +164,33 @@ async def get_telling(
     """Fetch one telling and its proposed split."""
     telling = await _load_telling(db, current_user.id, telling_id)
     return _telling_response(telling)
+
+
+async def _load_draft_telling(db: AsyncSession, user_id, telling_id) -> Telling:
+    """Load a telling whose segments can still be reshaped.
+
+    A committed telling's segments are already memories, so moving their
+    boundaries would orphan those memories and leave every segment pointing at
+    something that no longer matches its text.
+    """
+    telling = await _load_telling(db, user_id, telling_id)
+    if telling.status == COMMITTED:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "This telling has been committed; its segments are already "
+                "memories. Undo the commit first."
+            ),
+        )
+    return telling
+
+
+def _renumber(telling: Telling) -> None:
+    """Close any gaps so ordinals always run 0..n-1."""
+    for index, segment in enumerate(
+        sorted(telling.segments, key=lambda item: item.ordinal)
+    ):
+        segment.ordinal = index
 
 
 async def commit_telling(db: AsyncSession, user_id, telling_id: UUID) -> Telling:
@@ -269,6 +306,252 @@ async def update_segment(
     await db.commit()
 
     return _segment_response(segment)
+
+
+@router.get(
+    "/tellings/{telling_id}/memories",
+    response_model=list[MemoryResponse],
+    summary="List the memories a telling produced",
+    description="The memories this telling created, for review or for undoing a commit.",
+)
+async def list_telling_memories(
+    telling_id: UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    unlocked_ids: set[str] = Depends(get_unlocked_memory_ids),
+) -> list[MemoryResponse]:
+    """The memories this telling created, in the order it told them."""
+    telling = await _load_telling(db, current_user.id, telling_id)
+
+    ordered_ids = [
+        segment.memory_id for segment in telling.segments if segment.memory_id
+    ]
+    if not ordered_ids:
+        return []
+
+    result = await db.execute(
+        select(Memory).where(
+            Memory.id.in_(ordered_ids), Memory.user_id == current_user.id
+        )
+    )
+    by_id = {memory.id: memory for memory in result.scalars().all()}
+
+    # Narrative order, not creation order: the segments know the sequence, and
+    # commit-time timestamps can land in the same instant.
+    return [
+        _memory_response(by_id[memory_id], unlocked_ids)
+        for memory_id in ordered_ids
+        if memory_id in by_id
+    ]
+
+
+@router.delete(
+    "/tellings/{telling_id}/memories",
+    response_model=TellingResponse,
+    summary="Delete the memories a telling produced",
+    description="Undo a commit: remove its memories and return the telling to draft.",
+)
+async def delete_telling_memories(
+    telling_id: UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> TellingResponse:
+    """Undo a commit, keeping the telling and its transcript.
+
+    The segments keep their text and dates, so the telling can be corrected and
+    committed again rather than retold from scratch.
+    """
+    telling = await _load_telling(db, current_user.id, telling_id)
+
+    memory_ids = [
+        segment.memory_id for segment in telling.segments if segment.memory_id
+    ]
+    if memory_ids:
+        result = await db.execute(
+            select(Memory).where(
+                Memory.id.in_(memory_ids), Memory.user_id == current_user.id
+            )
+        )
+        for memory in result.scalars().all():
+            await db.delete(memory)
+
+    for segment in telling.segments:
+        segment.memory_id = None
+
+    # Back to a draft. The transcript is untouched, so this is a step back
+    # rather than a loss.
+    telling.status = DRAFT
+    await db.flush()
+    await db.commit()
+
+    return _telling_response(await _load_telling(db, current_user.id, telling_id))
+
+
+@router.post(
+    "/tellings/{telling_id}/segments/merge",
+    response_model=TellingResponse,
+    summary="Merge adjacent segments",
+    description="Join two or more adjacent proposed memories into one.",
+)
+async def merge_segments_endpoint(
+    telling_id: UUID,
+    payload: TellingSegmentMerge,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> TellingResponse:
+    """Merge adjacent segments, then close the gap in the ordinals."""
+    telling = await _load_draft_telling(db, current_user.id, telling_id)
+
+    by_id = {segment.id: segment for segment in telling.segments}
+    chosen = [by_id.get(segment_id) for segment_id in payload.segment_ids]
+    if any(segment is None for segment in chosen):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Segment not found"
+        )
+
+    ordered = sorted(chosen, key=lambda segment: segment.ordinal)
+    expected = list(range(ordered[0].ordinal, ordered[0].ordinal + len(ordered)))
+    if [segment.ordinal for segment in ordered] != expected:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Only adjacent segments can be merged",
+        )
+
+    # The first segment keeps its structured content. The joined text is the
+    # user's to re-title; re-deriving it would mean another model call, and the
+    # text they can see is now different from what it described anyway.
+    keeper = ordered[0]
+    keeper.text = " ".join(segment.text for segment in ordered)
+    for segment in ordered[1:]:
+        await db.delete(segment)
+    await db.flush()
+
+    _renumber(await _load_telling(db, current_user.id, telling_id))
+    await db.commit()
+
+    return _telling_response(await _load_telling(db, current_user.id, telling_id))
+
+
+@router.delete(
+    "/tellings/{telling_id}/segments/{segment_id}",
+    response_model=TellingResponse,
+    summary="Delete a proposed segment",
+    description="Remove a proposed memory from the draft and renumber the rest.",
+)
+async def delete_segment_endpoint(
+    telling_id: UUID,
+    segment_id: UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> TellingResponse:
+    """Drop a segment that should not become a memory."""
+    telling = await _load_draft_telling(db, current_user.id, telling_id)
+    segment = next(
+        (item for item in telling.segments if item.id == segment_id), None
+    )
+    if segment is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Segment not found"
+        )
+
+    await db.delete(segment)
+    await db.flush()
+    _renumber(await _load_telling(db, current_user.id, telling_id))
+    await db.commit()
+
+    return _telling_response(await _load_telling(db, current_user.id, telling_id))
+
+
+@router.post(
+    "/tellings/{telling_id}/segments/reorder",
+    response_model=TellingResponse,
+    summary="Reorder proposed segments",
+    description="Apply a new narrative order to the draft.",
+)
+async def reorder_segments_endpoint(
+    telling_id: UUID,
+    payload: TellingSegmentReorder,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> TellingResponse:
+    """Set the order the segments should be read in."""
+    telling = await _load_draft_telling(db, current_user.id, telling_id)
+
+    by_id = {segment.id: segment for segment in telling.segments}
+    # A partial list would leave the rest in an arbitrary place, so the order
+    # has to account for every segment exactly once.
+    if len(payload.segment_ids) != len(by_id) or set(payload.segment_ids) != set(
+        by_id
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="The order must list every segment exactly once",
+        )
+
+    for index, segment_id in enumerate(payload.segment_ids):
+        by_id[segment_id].ordinal = index
+
+    await db.commit()
+    return _telling_response(await _load_telling(db, current_user.id, telling_id))
+
+
+@router.post(
+    "/tellings/{telling_id}/segments/{segment_id}/split",
+    response_model=TellingResponse,
+    summary="Split a proposed segment",
+    description="Cut one proposed memory into two at a character offset.",
+)
+async def split_segment_endpoint(
+    telling_id: UUID,
+    segment_id: UUID,
+    payload: TellingSegmentSplit,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> TellingResponse:
+    """Cut a segment's text in two, keeping the first half where it was."""
+    telling = await _load_draft_telling(db, current_user.id, telling_id)
+    segment = next(
+        (item for item in telling.segments if item.id == segment_id), None
+    )
+    if segment is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Segment not found"
+        )
+
+    if payload.at >= len(segment.text):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="The split point is past the end of the text",
+        )
+
+    head = segment.text[: payload.at].strip()
+    tail = segment.text[payload.at :].strip()
+    if not head or not tail:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Both halves need some text",
+        )
+
+    for other in telling.segments:
+        if other.ordinal > segment.ordinal:
+            other.ordinal += 1
+    segment.text = head
+
+    # The new half starts blank. Copying the first half's title and date would
+    # describe text it no longer contains.
+    db.add(
+        TellingSegment(
+            telling_id=telling.id,
+            user_id=current_user.id,
+            ordinal=segment.ordinal + 1,
+            text=tail,
+            status=PROPOSED,
+        )
+    )
+    await db.flush()
+    await db.commit()
+
+    return _telling_response(await _load_telling(db, current_user.id, telling_id))
 
 
 @router.post(

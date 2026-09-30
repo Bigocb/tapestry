@@ -300,6 +300,250 @@ class TestInheritedFrameOutcomes:
         assert memory["review_reason"] == "missing_date"
 
 
+class TestReshapeSegments:
+    """A proposed split is a draft, and drafts are meant to be corrected."""
+
+    async def _draft(self, client, token, monkeypatch, texts):
+        async def fake_segmentation(transcript: str):
+            return SegmentationResult(
+                segments=[
+                    ProposedSegment(
+                        text=text,
+                        structured=_structured_memory(f"Part {index + 1}"),
+                    )
+                    for index, text in enumerate(texts)
+                ]
+            )
+
+        monkeypatch.setattr(
+            "app.routes.tellings.segment_transcript", fake_segmentation
+        )
+        return client.post(
+            "/api/tellings",
+            json={"raw_transcript": " ".join(texts)},
+            headers=_auth(token),
+        ).json()
+
+    async def test_merging_two_adjacent_segments(
+        self, client, setup_users, get_auth_token, monkeypatch
+    ):
+        await setup_users()
+        token = get_auth_token("alice", "password123")
+
+        draft = await self._draft(
+            client,
+            token,
+            monkeypatch,
+            ["First memory.", "Second memory.", "Third memory."],
+        )
+        first, second = draft["segments"][0]["id"], draft["segments"][1]["id"]
+
+        response = client.post(
+            f"/api/tellings/{draft['id']}/segments/merge",
+            json={"segment_ids": [first, second]},
+            headers=_auth(token),
+        )
+
+        assert response.status_code == 200
+        segments = response.json()["segments"]
+        assert len(segments) == 2
+        assert segments[0]["text"] == "First memory. Second memory."
+        # Ordinals close the gap the merge left.
+        assert [segment["ordinal"] for segment in segments] == [0, 1]
+        assert segments[1]["text"] == "Third memory."
+
+    async def test_deleting_a_segment_renumbers_the_rest(
+        self, client, setup_users, get_auth_token, monkeypatch
+    ):
+        await setup_users()
+        token = get_auth_token("alice", "password123")
+
+        draft = await self._draft(
+            client, token, monkeypatch, ["One.", "Two.", "Three."]
+        )
+        middle = draft["segments"][1]["id"]
+
+        response = client.delete(
+            f"/api/tellings/{draft['id']}/segments/{middle}",
+            headers=_auth(token),
+        )
+
+        assert response.status_code == 200
+        segments = response.json()["segments"]
+        assert [segment["text"] for segment in segments] == ["One.", "Three."]
+        assert [segment["ordinal"] for segment in segments] == [0, 1]
+
+    async def test_segments_can_be_reordered(
+        self, client, setup_users, get_auth_token, monkeypatch
+    ):
+        await setup_users()
+        token = get_auth_token("alice", "password123")
+
+        draft = await self._draft(
+            client, token, monkeypatch, ["One.", "Two.", "Three."]
+        )
+        reversed_ids = [
+            segment["id"] for segment in reversed(draft["segments"])
+        ]
+
+        response = client.post(
+            f"/api/tellings/{draft['id']}/segments/reorder",
+            json={"segment_ids": reversed_ids},
+            headers=_auth(token),
+        )
+
+        assert response.status_code == 200
+        segments = response.json()["segments"]
+        assert [segment["text"] for segment in segments] == [
+            "Three.",
+            "Two.",
+            "One.",
+        ]
+        assert [segment["ordinal"] for segment in segments] == [0, 1, 2]
+
+    async def test_splitting_a_segment_at_an_offset(
+        self, client, setup_users, get_auth_token, monkeypatch
+    ):
+        await setup_users()
+        token = get_auth_token("alice", "password123")
+
+        draft = await self._draft(
+            client, token, monkeypatch, ["First part and second part."]
+        )
+        segment_id = draft["segments"][0]["id"]
+
+        response = client.post(
+            f"/api/tellings/{draft['id']}/segments/{segment_id}/split",
+            json={"at": 15},
+            headers=_auth(token),
+        )
+
+        assert response.status_code == 200
+        segments = response.json()["segments"]
+        assert len(segments) == 2
+        assert segments[0]["text"] == "First part and"
+        assert segments[1]["text"] == "second part."
+        assert [segment["ordinal"] for segment in segments] == [0, 1]
+
+    async def test_a_committed_telling_refuses_structural_edits(
+        self, client, setup_users, get_auth_token, monkeypatch
+    ):
+        await setup_users()
+        token = get_auth_token("alice", "password123")
+
+        draft = await self._draft(client, token, monkeypatch, ["One.", "Two."])
+        ids = [segment["id"] for segment in draft["segments"]]
+        client.post(f"/api/tellings/{draft['id']}/commit", headers=_auth(token))
+
+        response = client.post(
+            f"/api/tellings/{draft['id']}/segments/merge",
+            json={"segment_ids": ids},
+            headers=_auth(token),
+        )
+
+        # Its segments are memories now; moving their boundaries would orphan
+        # them.
+        assert response.status_code == 409
+
+
+class TestTellingProvenance:
+    """What a telling produced, and how to take it back."""
+
+    async def _commit(
+        self, client, token, monkeypatch, texts=("One.", "Two.")
+    ):
+        async def fake_segmentation(transcript: str):
+            return SegmentationResult(
+                segments=[
+                    ProposedSegment(
+                        text=text, structured=_structured_memory(text)
+                    )
+                    for text in texts
+                ]
+            )
+
+        monkeypatch.setattr(
+            "app.routes.tellings.segment_transcript", fake_segmentation
+        )
+        draft = client.post(
+            "/api/tellings",
+            json={"raw_transcript": TRANSCRIPT},
+            headers=_auth(token),
+        ).json()
+        client.post(f"/api/tellings/{draft['id']}/commit", headers=_auth(token))
+        return draft
+
+    async def test_the_memories_a_telling_produced_can_be_listed(
+        self, client, setup_users, get_auth_token, monkeypatch
+    ):
+        await setup_users()
+        token = get_auth_token("alice", "password123")
+
+        draft = await self._commit(client, token, monkeypatch)
+
+        response = client.get(
+            f"/api/tellings/{draft['id']}/memories", headers=_auth(token)
+        )
+
+        assert response.status_code == 200
+        assert [memory["raw_input"] for memory in response.json()] == [
+            "One.",
+            "Two.",
+        ]
+
+    async def test_deleting_the_batch_keeps_the_telling_and_returns_it_to_draft(
+        self, client, setup_users, get_auth_token, monkeypatch
+    ):
+        await setup_users()
+        token = get_auth_token("alice", "password123")
+
+        draft = await self._commit(client, token, monkeypatch)
+
+        response = client.delete(
+            f"/api/tellings/{draft['id']}/memories", headers=_auth(token)
+        )
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["status"] == "draft"
+        assert body["raw_transcript"] == TRANSCRIPT
+        assert [segment["memory_id"] for segment in body["segments"]] == [
+            None,
+            None,
+        ]
+
+        assert client.get("/api/memories", headers=_auth(token)).json() == []
+
+        # The transcript survived, so the same telling can be committed again.
+        again = client.post(
+            f"/api/tellings/{draft['id']}/commit", headers=_auth(token)
+        )
+        assert again.status_code == 200
+        assert len(client.get("/api/memories", headers=_auth(token)).json()) == 2
+
+    async def test_another_user_cannot_list_or_delete_the_memories(
+        self, client, setup_users, get_auth_token, monkeypatch
+    ):
+        await setup_users()
+        alice = get_auth_token("alice", "password123")
+        bob = get_auth_token("bob", "password456")
+
+        draft = await self._commit(client, alice, monkeypatch)
+
+        assert (
+            client.get(
+                f"/api/tellings/{draft['id']}/memories", headers=_auth(bob)
+            ).status_code
+            == 404
+        )
+        assert (
+            client.delete(
+                f"/api/tellings/{draft['id']}/memories", headers=_auth(bob)
+            ).status_code
+            == 404
+        )
+
+
 class TestSegmentDates:
     """A resolved date is the cursor's best answer, not the last word."""
 
