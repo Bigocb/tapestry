@@ -2,17 +2,17 @@
 
 > **Status snapshot** — last reconciled 2026-09-29 against `master` @ `4cb7df2`.
 >
-> **Done (verified by code + tests):** Issues 2, 3, 4, 5, 6, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 28, 29
+> **Done (verified by code + tests):** Issues 2, 3, 4, 5, 6, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 28, 29, 30
 > **Partial:** Issue 1 (Postgres is now provisioned, but **the pgvector extension is not installed** — the database has only `plpgsql`; the schema, indexes and cross-DB type decorators are in place), Issue 7 (embeddings work via Ollama with a deterministic local fallback; **similarity is still computed in Python** — no ANN index, because pgvector is absent)
 > **Superseded:** Issue 27 — the deployment target changed. MEMIND runs in Docker Compose with Postgres on the homelab box, published through Traefik and cloudflared at `memory.cloutier.work`. The service is live; the Render-specific acceptance criteria no longer apply.
-> **Not started:** Phase 9, Issues 30–35 (Tellings). Issues 28 (tracer bullet) and 29 (segmentation) are done, deployed and verified.
+> **Not started:** Phase 9, Issues 31–36 (Tellings). Issues 28 (tracer bullet), 29 (segmentation) and 30 (the date cursor) are done, deployed and verified.
 >
 > **Key deviations from original plan:**
 > - **Storage:** production runs on Postgres 16 in Docker on the homelab box. SQLite (`memind.db`) remains the local-dev default.
 > - **Search:** full-text + semantic ranking done in Python over fetched rows, not Postgres `tsquery`/pgvector ANN.
 > - **Agents:** Ollama Cloud (`ollama.com/v1`, `gemma4:31b`) is primary. Story generation implements a Claude Opus fallback (`ANTHROPIC_API_KEY`), gated on a response-quality check; capture/refinement/enrichment are Ollama-only.
 > - **Transcription:** local `faster-whisper`; Issue 4's backend is wired. A 501 is still returned when the model or its dependency is genuinely unavailable — that is error handling, not the old stub.
-> - **Tests:** 407 backend passing, 1 skipped (the pgvector extension check) on in-memory SQLite, plus 13 frontend tests via vitest/jsdom.
+> - **Tests:** 418 backend passing, 1 skipped (the pgvector extension check) on in-memory SQLite, plus 21 frontend tests via vitest/jsdom.
 > - **Beyond the plan:** first-class entities, the privacy lock, the review queue and fuzzy dates all shipped outside the numbered issues, so this list understates the delivered surface.
 >
 > **Remaining work:** the pgvector half of Issue 1 (and the ANN search it would unblock in Issue 7), Phase 9 (Tellings, Issues 28–35), and active iteration on capture/parsing quality (Issues 4–6 area).
@@ -1039,13 +1039,38 @@ screen and stays manually correctable.
 
 #### Acceptance criteria
 
-- [ ] Absolute dates reset the cursor; relative phrases compute from it
-- [ ] "The next day" resolves relative to the preceding event, not to today
-- [ ] Shifting a fuzzy date never sharpens its precision
-- [ ] Backwards references work
-- [ ] A leap to a new absolute date re-anchors subsequent relative phrases
-- [ ] The resolved date is visible and editable in the review screen
-- [ ] The committed memory carries the narrative-resolved date
+- [x] Absolute dates reset the cursor; relative phrases compute from it
+- [x] "The next day" resolves relative to the preceding event, not to today
+- [x] Shifting a fuzzy date never sharpens its precision
+- [x] Backwards references work
+- [x] A leap to a new absolute date re-anchors subsequent relative phrases
+- [x] The resolved date is visible and editable in the review screen
+- [x] The committed memory carries the narrative-resolved date
+
+> **Status: DONE.** Verified on live input: "In August 2003…" anchors at
+> 2003-08-01, "The next day" resolves to 2003-08-02, and "Two years later" to
+> 2005 at year precision.
+>
+> Three things only real input revealed, none of which a unit test would have
+> predicted:
+>
+> - the cursor was being *bypassed*: the segmenter supplied a date of its own
+>   for "The next day" (the nearest month it could see), and a supplied date
+>   won, so the phrase was never resolved. Relative phrases now take precedence
+> - "no date" from the segmenter means two different things. Shown "The next
+>   day" alone it genuinely cannot resolve it — that is the cursor's job. But
+>   for "the DJ played early 2000s throwbacks" it correctly refuses, and the
+>   cursor was putting the year straight back. Only the first is handed on
+> - a label outlived its period: "two years later" carried "August 2003" onto
+>   a 2005 date. A label now survives a shift only while the result stays
+>   inside the period it describes
+>
+> Month and year arithmetic is calendar-aware — five years after 1976-07-29 is
+> 1981-07-29, and a fixed 365-day year lands on the 28th, which the test caught.
+>
+> Note for Issue 31: a leading "the next day" with no prior anchor stays
+> deliberately undated. Deciding what a story-wide frame should supply is that
+> issue's job, not this one's.
 
 ---
 
