@@ -110,3 +110,23 @@ class TestResolveTellingDates:
         )
 
         assert dates[1].event_date == datetime(2003, 8, 2)
+
+    def test_a_label_is_dropped_once_the_shift_leaves_its_period(self):
+        """Wording that described the anchor must not describe a later date."""
+        august = ResolvedDate(
+            event_date=datetime(2003, 8, 1), precision="month", label="August 2003"
+        )
+
+        dates = resolve_telling_dates(
+            [
+                "In August 2003 I started high school.",
+                "The next day my grandmother arrived.",
+                "Two years later I got my own car.",
+            ],
+            known=[august, None, None],
+        )
+
+        # A day later is still in August 2003, so the wording still holds.
+        assert dates[1].label == "August 2003"
+        # Two years later it describes nothing true.
+        assert dates[2].label is None

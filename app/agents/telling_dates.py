@@ -83,6 +83,19 @@ def _coarser(first: str, second: str) -> str:
     return second
 
 
+def _period_key(moment: datetime, precision: str):
+    """A comparable key for the period a precision describes."""
+    if precision == "decade":
+        return moment.year // 10
+    if precision == "year":
+        return moment.year
+    if precision == "month":
+        return (moment.year, moment.month)
+    if precision == "exact":
+        return (moment.year, moment.month, moment.day)
+    return None
+
+
 def _add_months(moment: datetime, months: int) -> datetime:
     """Add whole months, clamping the day to the target month's length.
 
@@ -177,11 +190,19 @@ def _shift(date: ResolvedDate, offset: RelativeOffset) -> ResolvedDate:
     else:
         shifted = _add_months(base, offset.amount * 12)
 
+    label = date.label
+    if label is not None and _period_key(shifted, date.precision) != _period_key(
+        base, date.precision
+    ):
+        # The wording described the anchor. Once the date leaves that period the
+        # words are no longer true of it — "August 2003" cannot label 2005.
+        label = None
+
     return ResolvedDate(
         event_date=shifted,
         precision=_coarser(date.precision, _OFFSET_PRECISION[offset.unit]),
         event_date_end=None,
-        label=date.label,
+        label=label,
     )
 
 
