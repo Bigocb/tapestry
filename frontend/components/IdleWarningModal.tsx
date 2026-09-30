@@ -23,11 +23,11 @@ export function IdleWarningModal({
       aria-labelledby="idle-warning-title"
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
     >
-      <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6">
+      <div className="bg-surface rounded-lg shadow-xl max-w-md w-full p-6">
         <h2 id="idle-warning-title" className="text-xl font-bold mb-2">
           Still there?
         </h2>
-        <p className="text-gray-600 mb-4">
+        <p className="text-ink-muted mb-4">
           You&apos;ve been inactive. For your privacy you&apos;ll be signed out
           in <strong>{clock}</strong>.
         </p>
@@ -35,13 +35,13 @@ export function IdleWarningModal({
           <button
             onClick={onStayActive}
             autoFocus
-            className="flex-1 bg-indigo-600 text-white px-4 py-2 rounded hover:bg-indigo-700"
+            className="flex-1 bg-flash text-flash-ink px-4 py-2 rounded hover:bg-flash-dark"
           >
             Stay signed in
           </button>
           <button
             onClick={onLogout}
-            className="px-4 py-2 rounded border border-gray-300 text-gray-700 hover:bg-gray-50"
+            className="px-4 py-2 rounded border border-line text-ink hover:bg-bg"
           >
             Sign out now
           </button>

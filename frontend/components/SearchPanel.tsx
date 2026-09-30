@@ -59,49 +59,50 @@ export function SearchPanel() {
 
   return (
     <div>
-      <h1 className="text-2xl font-bold mb-4">Search memories</h1>
-      <form onSubmit={submit} className="grid grid-cols-1 md:grid-cols-4 gap-3 mb-6">
+      <h1 className="text-3xl font-bold mb-6">Search</h1>
+      <form onSubmit={submit} className="grid grid-cols-1 md:grid-cols-4 gap-3 mb-8">
         <input
           type="text"
           placeholder="Natural language search..."
-          className="border rounded p-2 md:col-span-2"
+          className="border border-line rounded-lg p-2 md:col-span-2 bg-surface placeholder:text-ink-faint focus:outline-none focus:ring-2 focus:ring-flash/30 focus:border-flash"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
         />
         <input
           type="text"
           placeholder="Mood"
-          className="border rounded p-2"
+          className="border border-line rounded-lg p-2 bg-surface placeholder:text-ink-faint focus:outline-none focus:ring-2 focus:ring-flash/30 focus:border-flash"
           value={mood}
           onChange={(e) => setMood(e.target.value)}
         />
         <input
           type="text"
           placeholder="Tag"
-          className="border rounded p-2"
+          className="border border-line rounded-lg p-2 bg-surface placeholder:text-ink-faint focus:outline-none focus:ring-2 focus:ring-flash/30 focus:border-flash"
           value={tag}
           onChange={(e) => setTag(e.target.value)}
         />
         <div className="flex items-center gap-2">
-          <span className="text-sm">Min importance:</span>
+          <span className="stamp text-ink-muted shrink-0">Min importance</span>
           <input
             type="range"
             min={1}
             max={5}
             value={minImportance}
             onChange={(e) => setMinImportance(Number(e.target.value))}
+            className="accent-flash"
           />
-          <span>{minImportance}</span>
+          <span className="stamp text-ink">{minImportance}</span>
         </div>
         <button
           type="submit"
           disabled={busy}
-          className="bg-indigo-600 text-white rounded p-2 hover:bg-indigo-700 disabled:opacity-50"
+          className="bg-flash text-flash-ink font-semibold rounded-lg p-2 hover:bg-flash-dark disabled:opacity-50 transition"
         >
-          {busy ? "Searching..." : "Search"}
+          {busy ? "Searching…" : "Search"}
         </button>
       </form>
-      {error && <p className="text-red-600 mb-4">{error}</p>}
+      {error && <p className="text-coral mb-4">{error}</p>}
       <div className="grid gap-4">
         {results.map((memory) => (
           <MemoryCard
@@ -110,7 +111,9 @@ export function SearchPanel() {
             onDelete={handleDelete}
           />
         ))}
-        {results.length === 0 && !busy && <p>No memories found.</p>}
+        {results.length === 0 && !busy && (
+          <p className="text-ink-muted">No memories found.</p>
+        )}
       </div>
     </div>
   );

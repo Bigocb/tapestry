@@ -131,14 +131,14 @@ export function TellingReview({ tellingId }: { tellingId: string }) {
     }
   }
 
-  if (error) return <p className="text-red-600">{error}</p>;
-  if (!telling) return <p className="text-gray-500">Loading…</p>;
+  if (error) return <p className="text-coral">{error}</p>;
+  if (!telling) return <p className="text-ink-muted">Loading…</p>;
 
   if (IN_PROGRESS.includes(telling.status)) {
     return (
       <div className="max-w-3xl mx-auto">
         <h1 className="text-2xl font-bold mb-4">Tell a story</h1>
-        <p className="text-gray-600">
+        <p className="text-ink-muted">
           {telling.status === "transcribing"
             ? "Transcribing your recording…"
             : "Splitting it into memories…"}
@@ -151,11 +151,11 @@ export function TellingReview({ tellingId }: { tellingId: string }) {
     return (
       <div className="max-w-3xl mx-auto space-y-4">
         <h1 className="text-2xl font-bold">Tell a story</h1>
-        <div className="border rounded p-4 bg-red-50">
-          <h2 className="font-semibold text-red-800">
+        <div className="border rounded p-4 bg-coral/10">
+          <h2 className="font-semibold text-coral">
             That recording could not be processed
           </h2>
-          <p className="text-sm text-gray-700">
+          <p className="text-sm text-ink">
             {telling.error || "No reason was given."}
           </p>
         </div>
@@ -172,14 +172,14 @@ export function TellingReview({ tellingId }: { tellingId: string }) {
     <div className="max-w-3xl mx-auto space-y-8">
       <section>
         <h1 className="text-2xl font-bold mb-4">Tell a story</h1>
-        <div className="border rounded p-4 bg-gray-50 space-y-3">
+        <div className="border rounded p-4 bg-bg space-y-3">
           <label className="block">
-            <span className="block text-xs uppercase tracking-wide text-gray-500 mb-2">
+            <span className="block text-xs uppercase tracking-wide text-ink-muted mb-2">
               What you said
             </span>
             <textarea
               data-testid="telling-transcript"
-              className="w-full border rounded p-3 h-40 text-gray-700"
+              className="w-full border rounded p-3 h-40 text-ink"
               value={transcript ?? ""}
               onChange={(event) => setTranscript(event.target.value)}
             />
@@ -188,12 +188,12 @@ export function TellingReview({ tellingId }: { tellingId: string }) {
             type="button"
             onClick={resplitTranscript}
             disabled={busy}
-            className="border px-4 py-2 rounded hover:bg-white disabled:opacity-50"
+            className="border px-4 py-2 rounded hover:bg-surface disabled:opacity-50"
           >
             Re-split
           </button>
           {resplit ? (
-            <p className="text-sm text-gray-600">Re-split: {resplit}.</p>
+            <p className="text-sm text-ink-muted">Re-split: {resplit}.</p>
           ) : null}
         </div>
       </section>
@@ -201,7 +201,7 @@ export function TellingReview({ tellingId }: { tellingId: string }) {
       <section>
         <h2 className="text-xl font-bold mb-4">Proposed memories</h2>
         {telling.frame_label ? (
-          <p className="mb-3 text-gray-600">
+          <p className="mb-3 text-ink-muted">
             This telling is about:{" "}
             <span className="font-medium">{telling.frame_label}</span>
           </p>
@@ -248,7 +248,7 @@ export function TellingReview({ tellingId }: { tellingId: string }) {
 
       <section className="space-y-3">
         {nothingToSave ? (
-          <p className="text-sm text-amber-700">
+          <p className="text-sm text-flash">
             Nothing is left to save. Edit what you said above and re-split.
           </p>
         ) : null}
@@ -257,7 +257,7 @@ export function TellingReview({ tellingId }: { tellingId: string }) {
             type="button"
             onClick={undo}
             disabled={busy}
-            className="border px-4 py-2 rounded hover:bg-gray-50 disabled:opacity-50"
+            className="border px-4 py-2 rounded hover:bg-bg disabled:opacity-50"
           >
             Delete these memories
           </button>
@@ -266,15 +266,15 @@ export function TellingReview({ tellingId }: { tellingId: string }) {
             type="button"
             onClick={commit}
             disabled={busy || nothingToSave}
-            className="bg-indigo-600 text-white px-4 py-2 rounded hover:bg-indigo-700 disabled:opacity-50"
+            className="bg-flash text-flash-ink px-4 py-2 rounded hover:bg-flash-dark disabled:opacity-50"
           >
             Save these memories
           </button>
         )}
         {result ? (
-          <div className="border rounded p-4 bg-green-50">
-            <h3 className="font-semibold text-green-800">Saved</h3>
-            <p className="text-sm text-gray-600">{result}</p>
+          <div className="border rounded p-4 bg-mint/10">
+            <h3 className="font-semibold text-mint">Saved</h3>
+            <p className="text-sm text-ink-muted">{result}</p>
           </div>
         ) : null}
       </section>
@@ -377,11 +377,11 @@ function SegmentCard({
     <article
       data-testid="telling-segment"
       className={`border rounded p-4 space-y-3 ${
-        segment.status === "rejected" ? "bg-gray-50 opacity-75" : "bg-white"
+        segment.status === "rejected" ? "bg-bg opacity-75" : "bg-surface"
       }`}
     >
       <h3 className="font-semibold">{segment.title}</h3>
-      <p className="text-sm text-gray-500">
+      <p className="text-sm text-ink-muted">
         {formatMemoryDate(segment) || "No date"}
       </p>
 
@@ -396,7 +396,7 @@ function SegmentCard({
       </label>
 
       {segment.status === "rejected" ? (
-        <p className="text-sm text-amber-700">
+        <p className="text-sm text-flash">
           Rejected — this will not become a memory.
         </p>
       ) : null}
@@ -441,7 +441,7 @@ function SegmentCard({
           type="button"
           onClick={save}
           disabled={disabled}
-          className="bg-indigo-600 text-white px-4 py-2 rounded hover:bg-indigo-700 disabled:opacity-50"
+          className="bg-flash text-flash-ink px-4 py-2 rounded hover:bg-flash-dark disabled:opacity-50"
         >
           Save
         </button>
@@ -449,7 +449,7 @@ function SegmentCard({
           type="button"
           onClick={reject}
           disabled={disabled}
-          className="border px-4 py-2 rounded hover:bg-gray-50 disabled:opacity-50"
+          className="border px-4 py-2 rounded hover:bg-bg disabled:opacity-50"
         >
           Reject
         </button>
@@ -458,7 +458,7 @@ function SegmentCard({
             type="button"
             onClick={() => onMove(-1)}
             disabled={disabled}
-            className="border px-4 py-2 rounded hover:bg-gray-50 disabled:opacity-50"
+            className="border px-4 py-2 rounded hover:bg-bg disabled:opacity-50"
           >
             Move up
           </button>
@@ -468,7 +468,7 @@ function SegmentCard({
             type="button"
             onClick={() => onMove(1)}
             disabled={disabled}
-            className="border px-4 py-2 rounded hover:bg-gray-50 disabled:opacity-50"
+            className="border px-4 py-2 rounded hover:bg-bg disabled:opacity-50"
           >
             Move down
           </button>
@@ -478,7 +478,7 @@ function SegmentCard({
             type="button"
             onClick={onMergeWithNext}
             disabled={disabled}
-            className="border px-4 py-2 rounded hover:bg-gray-50 disabled:opacity-50"
+            className="border px-4 py-2 rounded hover:bg-bg disabled:opacity-50"
           >
             Merge with next
           </button>
@@ -487,7 +487,7 @@ function SegmentCard({
           type="button"
           onClick={splitHere}
           disabled={disabled}
-          className="border px-4 py-2 rounded hover:bg-gray-50 disabled:opacity-50"
+          className="border px-4 py-2 rounded hover:bg-bg disabled:opacity-50"
         >
           Split here
         </button>
@@ -495,7 +495,7 @@ function SegmentCard({
           type="button"
           onClick={onDelete}
           disabled={disabled}
-          className="border px-4 py-2 rounded hover:bg-gray-50 disabled:opacity-50"
+          className="border px-4 py-2 rounded hover:bg-bg disabled:opacity-50"
         >
           Delete
         </button>

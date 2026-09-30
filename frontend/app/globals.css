@@ -1,11 +1,88 @@
 @import "tailwindcss";
 
-:root {
-  --foreground-rgb: 0, 0, 0;
-  --background-rgb: 250, 250, 250;
+@theme {
+  --color-bg: #121016;
+  --color-bg-raised: #1b1820;
+  --color-surface: #201d27;
+  --color-surface-2: #2a2632;
+  --color-line: #322e3b;
+
+  --color-ink: #f4f2f6;
+  --color-ink-muted: #948fa0;
+  --color-ink-faint: #5e5969;
+
+  --color-flash: #ffd23f;
+  --color-flash-dark: #e6bb2e;
+  --color-flash-ink: #332800;
+
+  --color-violet: #8b87ff;
+  --color-violet-dark: #6f6ae0;
+
+  --color-mint: #5fe3b3;
+  --color-coral: #ff6b5e;
+  --color-coral-dark: #e85347;
+
+  --font-display: var(--font-unbounded), "Arial Black", sans-serif;
+  --font-body: var(--font-hanken), system-ui, -apple-system, sans-serif;
+  --font-mono: var(--font-plex-mono), ui-monospace, "SFMono-Regular", monospace;
 }
 
 body {
-  color: rgb(var(--foreground-rgb));
-  background: rgb(var(--background-rgb));
+  background: var(--color-bg);
+  color: var(--color-ink);
+  font-family: var(--font-body);
+}
+
+h1,
+h2,
+h3 {
+  font-family: var(--font-display);
+  letter-spacing: -0.01em;
+}
+
+/* The archive stamp: a recurring device for dates, counts and status text,
+   evoking a postmark or a data readout. */
+.stamp {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+@keyframes pulse-ring {
+  0% {
+    box-shadow: 0 0 0 0 rgba(255, 210, 63, 0.45);
+  }
+  70% {
+    box-shadow: 0 0 0 14px rgba(255, 210, 63, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(255, 210, 63, 0);
+  }
+}
+
+.fab-pulse {
+  animation: pulse-ring 2.8s ease-out infinite;
+}
+
+@keyframes flash-in {
+  0% {
+    background: rgba(255, 210, 63, 0.35);
+    border-color: var(--color-flash);
+  }
+  100% {
+    background: var(--color-surface);
+    border-color: var(--color-line);
+  }
+}
+
+.flash-in {
+  animation: flash-in 0.9s ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fab-pulse,
+  .flash-in {
+    animation: none !important;
+  }
 }

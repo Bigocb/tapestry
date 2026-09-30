@@ -79,25 +79,25 @@ export function Timeline() {
   };
 
   return (
-    <div className="max-w-3xl mx-auto">
-      <h1 className="text-2xl font-bold mb-6">Timeline</h1>
-      {error && <p className="text-red-600">{error}</p>}
+    <div className="max-w-3xl">
+      <h1 className="text-3xl font-bold mb-6">Timeline</h1>
+      {error && <p className="text-coral">{error}</p>}
 
       {groupOrder.length > 1 && (
-        <nav className="mb-6 flex flex-wrap gap-x-3 gap-y-1 text-sm">
+        <nav className="mb-8 flex flex-wrap gap-x-4 gap-y-1">
           {groupOrder.map((key) => (
             <a
               key={key}
               href={`#period-${slug(key)}`}
-              className="text-indigo-700 underline"
+              className="stamp text-flash hover:text-flash-dark border-b border-dotted border-flash/40"
             >
               {timelineGroupHeading(byDate[key])}
             </a>
           ))}
         </nav>
       )}
-      <div className="border-l-2 border-indigo-200 ml-3 space-y-6">
-        {groupOrder.map((key) => {
+      <div className="border-l-2 border-dotted border-line ml-3 space-y-8">
+        {groupOrder.map((key, idx) => {
           const items = byDate[key];
           const heading = timelineGroupHeading(items);
 
@@ -105,22 +105,34 @@ export function Timeline() {
             <div
               key={key}
               id={`period-${slug(key)}`}
-              className="relative pl-6 scroll-mt-4"
+              className="relative pl-7 scroll-mt-4"
             >
-              <div className="absolute -left-[9px] top-1 w-4 h-4 rounded-full bg-indigo-600 border-2 border-white"></div>
-              <h2 className="font-semibold text-lg mb-2">{heading}</h2>
+              <div
+                className={`absolute -left-[7px] top-1.5 w-3 h-3 rounded-full ring-4 ring-bg ${
+                  idx === 0 ? "bg-flash" : "bg-ink-faint"
+                }`}
+              ></div>
+              <h2 className="text-lg mb-3">{heading}</h2>
               <ul className="space-y-2">
                 {items.map((memory) => (
-                  <li key={memory.id} className="bg-white border rounded p-3">
+                  <li
+                    key={memory.id}
+                    className="bg-surface border border-line rounded-lg p-3 hover:border-flash transition"
+                  >
                     <Link
                       href={`/memories/${memory.id}`}
-                      className="font-medium hover:text-indigo-600"
+                      className="font-medium text-ink hover:text-flash"
                     >
                       {memory.title || memory.summary || memory.raw_input}
                     </Link>
-                    <p className="text-sm text-gray-500 flex flex-wrap items-center gap-x-2">
+                    <p className="flex flex-wrap items-center gap-2 mt-1.5">
                       {rowDetail(memory, heading).map((bit) => (
-                        <span key={bit}>{bit}</span>
+                        <span
+                          key={bit}
+                          className="stamp text-ink-muted border border-dashed border-line rounded-sm px-1.5 py-0.5"
+                        >
+                          {bit}
+                        </span>
                       ))}
                     </p>
                   </li>
@@ -129,7 +141,9 @@ export function Timeline() {
             </div>
           );
         })}
-        {memories.length === 0 && !error && <p>No memories yet.</p>}
+        {memories.length === 0 && !error && (
+          <p className="text-ink-muted">No memories yet.</p>
+        )}
       </div>
     </div>
   );

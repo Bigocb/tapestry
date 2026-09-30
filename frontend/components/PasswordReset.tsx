@@ -25,12 +25,12 @@ export function ForgotPasswordForm() {
     return (
       <div className="max-w-sm mx-auto mt-12 space-y-3">
         <h1 className="text-2xl font-bold">Check your email</h1>
-        <p className="text-gray-600">
+        <p className="text-ink-muted">
           If that account exists, a reset link has been created. On a
           self-hosted setup with no mail configured, the link is written to the
           server log instead.
         </p>
-        <Link href="/login" className="text-indigo-700 underline text-sm">
+        <Link href="/login" className="text-flash underline text-sm">
           Back to login
         </Link>
       </div>
@@ -59,11 +59,11 @@ export function ForgotPasswordForm() {
       <button
         type="submit"
         disabled={busy}
-        className="w-full bg-indigo-600 text-white rounded py-2 hover:bg-indigo-700 disabled:opacity-50"
+        className="w-full bg-flash text-flash-ink rounded py-2 hover:bg-flash-dark disabled:opacity-50"
       >
         Send reset link
       </button>
-      <Link href="/login" className="block text-indigo-700 underline text-sm">
+      <Link href="/login" className="block text-flash underline text-sm">
         Back to login
       </Link>
     </form>
@@ -102,7 +102,7 @@ export function ResetPasswordForm() {
     return (
       <div className="max-w-sm mx-auto mt-12 space-y-3">
         <h1 className="text-2xl font-bold">Password changed</h1>
-        <Link href="/login" className="text-indigo-700 underline text-sm">
+        <Link href="/login" className="text-flash underline text-sm">
           Log in with your new password
         </Link>
       </div>
@@ -112,7 +112,7 @@ export function ResetPasswordForm() {
   return (
     <form onSubmit={submit} className="space-y-4 max-w-sm mx-auto mt-12">
       <h1 className="text-2xl font-bold">Choose a new password</h1>
-      {error && <p className="text-red-600">{error}</p>}
+      {error && <p className="text-coral">{error}</p>}
       <label className="block">
         <span className="block font-medium mb-1">New password</span>
         <input
@@ -130,7 +130,7 @@ export function ResetPasswordForm() {
       <button
         type="submit"
         disabled={busy || !token}
-        className="w-full bg-indigo-600 text-white rounded py-2 hover:bg-indigo-700 disabled:opacity-50"
+        className="w-full bg-flash text-flash-ink rounded py-2 hover:bg-flash-dark disabled:opacity-50"
       >
         Set new password
       </button>

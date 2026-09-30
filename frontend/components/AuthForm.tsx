@@ -5,6 +5,9 @@ import { useState } from "react";
 import { useAuth } from "@/lib/auth";
 import { api } from "@/lib/api";
 
+const inputClass =
+  "w-full border border-line rounded-lg px-3 py-2.5 bg-bg-raised text-ink placeholder:text-ink-faint focus:outline-none focus:ring-2 focus:ring-flash/30 focus:border-flash";
+
 export function LoginForm() {
   const { login } = useAuth();
   const [username, setUsername] = useState("");
@@ -23,14 +26,14 @@ export function LoginForm() {
   };
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-4 max-w-sm mx-auto">
-      <h2 className="text-2xl font-bold">Login</h2>
-      {error && <p className="text-red-600">{error}</p>}
+    <form onSubmit={handleSubmit} className="space-y-4">
+      <h2 className="text-2xl font-bold">Welcome back</h2>
+      {error && <p className="text-coral text-sm">{error}</p>}
       <input
         type="text"
         placeholder="Username"
         autoCapitalize="none" autoCorrect="off" spellCheck={false} autoComplete="username"
-        className="w-full border rounded px-3 py-2"
+        className={inputClass}
         value={username}
         onChange={(e) => setUsername(e.target.value)}
         required
@@ -39,20 +42,20 @@ export function LoginForm() {
         type="password"
         placeholder="Password"
         autoCapitalize="none" autoCorrect="off" autoComplete="current-password"
-        className="w-full border rounded px-3 py-2"
+        className={inputClass}
         value={password}
         onChange={(e) => setPassword(e.target.value)}
         required
       />
       <button
         type="submit"
-        className="w-full bg-indigo-600 text-white rounded py-2 hover:bg-indigo-700"
+        className="w-full bg-flash text-flash-ink rounded-lg py-2.5 font-semibold hover:bg-flash-dark transition"
       >
         Login
       </button>
       <Link
         href="/forgot-password"
-        className="block text-sm text-indigo-700 underline"
+        className="block text-sm text-violet hover:underline"
       >
         Forgot your password?
       </Link>
@@ -86,14 +89,14 @@ export function SignupForm({ onDone }: { onDone?: () => void }) {
   };
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-4 max-w-sm mx-auto">
-      <h2 className="text-2xl font-bold">Sign up</h2>
-      {error && <p className="text-red-600">{error}</p>}
+    <form onSubmit={handleSubmit} className="space-y-4">
+      <h2 className="text-2xl font-bold">Start your archive</h2>
+      {error && <p className="text-coral text-sm">{error}</p>}
       <input
         type="text"
         placeholder="Username"
         autoCapitalize="none" autoCorrect="off" spellCheck={false} autoComplete="username"
-        className="w-full border rounded px-3 py-2"
+        className={inputClass}
         value={username}
         onChange={(e) => setUsername(e.target.value)}
         required
@@ -102,7 +105,7 @@ export function SignupForm({ onDone }: { onDone?: () => void }) {
         type="email"
         placeholder="Email"
         autoCapitalize="none" autoCorrect="off" spellCheck={false} autoComplete="email"
-        className="w-full border rounded px-3 py-2"
+        className={inputClass}
         value={email}
         onChange={(e) => setEmail(e.target.value)}
         required
@@ -111,7 +114,7 @@ export function SignupForm({ onDone }: { onDone?: () => void }) {
         type="password"
         placeholder="Password"
         autoCapitalize="none" autoCorrect="off" autoComplete="new-password"
-        className="w-full border rounded px-3 py-2"
+        className={inputClass}
         value={password}
         onChange={(e) => setPassword(e.target.value)}
         required
@@ -120,14 +123,14 @@ export function SignupForm({ onDone }: { onDone?: () => void }) {
         type="password"
         placeholder="Confirm password"
         autoCapitalize="none" autoCorrect="off" autoComplete="new-password"
-        className="w-full border rounded px-3 py-2"
+        className={inputClass}
         value={confirm}
         onChange={(e) => setConfirm(e.target.value)}
         required
       />
       <button
         type="submit"
-        className="w-full bg-indigo-600 text-white rounded py-2 hover:bg-indigo-700"
+        className="w-full bg-flash text-flash-ink rounded-lg py-2.5 font-semibold hover:bg-flash-dark transition"
       >
         Sign up
       </button>

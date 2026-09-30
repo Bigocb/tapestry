@@ -90,7 +90,7 @@ export function StoriesPanel() {
     <div className="space-y-8">
       <section>
         <h1 className="text-2xl font-bold mb-4">Build a story</h1>
-        {error && <p className="text-red-600 mb-4">{error}</p>}
+        {error && <p className="text-coral mb-4">{error}</p>}
         <form onSubmit={generate} className="space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-64 overflow-y-auto border rounded p-3">
             {memories.map((memory) => (
@@ -126,7 +126,7 @@ export function StoriesPanel() {
           <button
             type="submit"
             disabled={busy}
-            className="bg-indigo-600 text-white px-4 py-2 rounded hover:bg-indigo-700 disabled:opacity-50"
+            className="bg-flash text-flash-ink px-4 py-2 rounded hover:bg-flash-dark disabled:opacity-50"
           >
             {busy ? "Generating..." : "Generate story"}
           </button>
@@ -137,11 +137,11 @@ export function StoriesPanel() {
         <h2 className="text-xl font-bold mb-4">Your stories</h2>
         <div className="grid gap-4">
           {stories.map((story) => (
-            <div key={story.id} className="border rounded p-4 bg-white">
+            <div key={story.id} className="border rounded p-4 bg-surface">
               <div className="flex justify-between items-start">
                 <div>
                   <h3 className="font-semibold">{story.title}</h3>
-                  <p className="text-sm text-gray-500">
+                  <p className="text-sm text-ink-muted">
                     {story.story_type} ·{" "}
                     {new Date(story.created_at).toLocaleDateString()}
                   </p>
@@ -151,7 +151,7 @@ export function StoriesPanel() {
                     <button
                       key={fmt}
                       onClick={() => exportStory(story.id, fmt)}
-                      className="text-xs bg-gray-100 hover:bg-gray-200 px-2 py-1 rounded"
+                      className="text-xs bg-surface-2 hover:bg-surface-2 px-2 py-1 rounded"
                     >
                       .{fmt}
                     </button>
@@ -159,7 +159,7 @@ export function StoriesPanel() {
                 </div>
               </div>
               <div className="mt-3 prose prose-sm max-w-none">
-                <pre className="whitespace-pre-wrap font-sans text-gray-700">
+                <pre className="whitespace-pre-wrap font-sans text-ink">
                   {story.content}
                 </pre>
               </div>

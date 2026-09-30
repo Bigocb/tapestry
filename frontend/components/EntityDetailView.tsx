@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { api } from "@/lib/api";
+import { MapPinIcon } from "@heroicons/react/24/outline";
 
 interface EntityMemoryRef {
   id: string;
@@ -76,6 +77,14 @@ function formatWhen(memory: EntityMemoryRef): string {
   }
   return new Date(memory.created_at).toLocaleDateString();
 }
+
+const actionBoxClass = "bg-surface border border-line rounded-2xl p-5";
+const fieldClass =
+  "bg-bg-raised border border-line rounded-lg p-2.5 text-sm text-ink placeholder:text-ink-faint focus:outline-none focus:ring-2 focus:ring-flash/30 focus:border-flash";
+const btnOutline =
+  "border border-line rounded-lg px-4 py-2 text-sm font-semibold hover:border-flash hover:text-flash transition disabled:opacity-50 disabled:hover:border-line disabled:hover:text-ink";
+const btnSolid =
+  "bg-flash text-flash-ink rounded-lg px-4 py-2 text-sm font-bold hover:bg-flash-dark transition disabled:opacity-40";
 
 export function EntityDetailView({ id }: { id: string }) {
   const [entity, setEntity] = useState<EntityDetail | null>(null);
@@ -318,9 +327,9 @@ export function EntityDetailView({ id }: { id: string }) {
     }
   };
 
-  if (loading) return <p>Loading...</p>;
-  if (error) return <p className="text-red-600">{error}</p>;
-  if (!entity) return <p>Entity not found.</p>;
+  if (loading) return <p className="text-ink-muted">Loading&hellip;</p>;
+  if (error) return <p className="text-coral">{error}</p>;
+  if (!entity) return <p className="text-ink-muted">Entity not found.</p>;
 
   const kindLabel =
     entity.kind === "person"
@@ -328,26 +337,42 @@ export function EntityDetailView({ id }: { id: string }) {
       : entity.kind === "place"
         ? "Place"
         : "Organization";
+  const isPerson = entity.kind === "person";
 
   return (
-    <div className="max-w-2xl mx-auto space-y-6">
+    <div className="max-w-2xl space-y-6">
       <div>
-        <p className="text-sm text-gray-500">{kindLabel}</p>
-        <h1 className="text-2xl font-bold">{entity.canonical_name}</h1>
-        <p className="text-sm text-gray-500 mt-1">
-          {entity.mention_count}{" "}
-          {entity.mention_count === 1 ? "memory" : "memories"}
-        </p>
+        <p className="stamp text-ink-muted">{kindLabel}</p>
+        <div className="flex items-center gap-4 mt-2">
+          <span
+            className={`shrink-0 w-14 h-14 rounded-full flex items-center justify-center font-display text-xl ${
+              isPerson ? "bg-violet/15 text-violet" : "bg-mint/15 text-mint"
+            }`}
+          >
+            {isPerson ? (
+              entity.canonical_name.charAt(0).toUpperCase()
+            ) : (
+              <MapPinIcon className="w-6 h-6" />
+            )}
+          </span>
+          <div>
+            <h1 className="text-2xl font-bold">{entity.canonical_name}</h1>
+            <p className="stamp text-ink-muted mt-1">
+              {entity.mention_count}{" "}
+              {entity.mention_count === 1 ? "mention" : "mentions"}
+            </p>
+          </div>
+        </div>
       </div>
 
       {notice && (
-        <div className="bg-green-50 border border-green-200 rounded p-3 text-sm flex items-center justify-between gap-3">
-          <span>{notice}</span>
+        <div className="bg-mint/10 border border-mint/30 rounded-xl p-3 text-sm flex items-center justify-between gap-3">
+          <span className="text-ink">{notice}</span>
           {lastMerge && (
             <button
               onClick={undo}
               disabled={busy}
-              className="text-green-800 underline disabled:opacity-50 shrink-0"
+              className="text-mint underline disabled:opacity-50 shrink-0"
             >
               Undo merge
             </button>
@@ -356,7 +381,7 @@ export function EntityDetailView({ id }: { id: string }) {
             <button
               onClick={undoTheSplit}
               disabled={busy}
-              className="text-green-800 underline disabled:opacity-50 shrink-0"
+              className="text-mint underline disabled:opacity-50 shrink-0"
             >
               Undo split
             </button>
@@ -366,12 +391,12 @@ export function EntityDetailView({ id }: { id: string }) {
 
       {entity.aliases.length > 0 && (
         <section>
-          <h2 className="font-semibold mb-2">Also known as</h2>
+          <p className="stamp text-ink-faint mb-2">Also known as</p>
           <div className="flex flex-wrap gap-2">
             {entity.aliases.map((alias) => (
               <span
                 key={alias}
-                className="text-xs bg-gray-100 text-gray-700 px-2 py-1 rounded"
+                className="text-xs bg-surface-2 border border-line text-ink-muted px-2.5 py-1 rounded-full"
               >
                 {alias}
               </span>
@@ -381,18 +406,18 @@ export function EntityDetailView({ id }: { id: string }) {
       )}
 
       {(entity.facts ?? []).length > 0 && (
-        <section className="border border-sky-200 bg-sky-50 rounded p-4">
-          <h2 className="font-semibold mb-1">Found elsewhere</h2>
+        <section className="bg-violet/8 border border-violet/30 rounded-2xl p-5">
+          <p className="stamp text-violet mb-2">Found elsewhere</p>
           <ul className="space-y-3">
             {(entity.facts ?? []).map((fact) => (
               <li key={fact.id} className="text-sm">
                 <div className="flex items-start justify-between gap-3">
                   <div>
-                    <p className="font-medium">{fact.label}</p>
+                    <p className="font-medium text-ink">{fact.label}</p>
                     {fact.description && (
-                      <p className="text-gray-700">{fact.description}</p>
+                      <p className="text-ink-muted mt-0.5">{fact.description}</p>
                     )}
-                    <p className="text-xs text-sky-800 mt-1">
+                    <p className="stamp text-ink-faint mt-2">
                       from {fact.source}
                       {fact.url ? (
                         <>
@@ -401,7 +426,7 @@ export function EntityDetailView({ id }: { id: string }) {
                             href={fact.url}
                             target="_blank"
                             rel="noreferrer"
-                            className="underline"
+                            className="underline text-violet normal-case tracking-normal"
                           >
                             {fact.source_id}
                           </a>
@@ -415,7 +440,7 @@ export function EntityDetailView({ id }: { id: string }) {
                     type="button"
                     onClick={() => discard(fact.id)}
                     disabled={busy}
-                    className="text-xs text-gray-600 underline shrink-0 disabled:opacity-50"
+                    className="text-xs text-ink-faint underline shrink-0 disabled:opacity-50 hover:text-ink-muted"
                   >
                     Discard
                   </button>
@@ -423,7 +448,7 @@ export function EntityDetailView({ id }: { id: string }) {
               </li>
             ))}
           </ul>
-          <p className="text-xs text-sky-800 mt-3">
+          <p className="stamp text-ink-faint mt-3 normal-case tracking-normal italic">
             Looked up, not remembered — {entity.canonical_name} never told us
             this.
           </p>
@@ -431,22 +456,22 @@ export function EntityDetailView({ id }: { id: string }) {
       )}
 
       {entity.kind === "place" && (
-        <section className="border rounded p-4">
-          <h2 className="font-semibold mb-1">Look this place up</h2>
-          <p className="text-sm text-gray-600 mb-2">
+        <section className={actionBoxClass}>
+          <p className="font-semibold mb-1">Look this place up</p>
+          <p className="text-sm text-ink-muted mb-3">
             Searches Wikidata by name. Nothing is kept until you choose it.
           </p>
           <button
             type="button"
             onClick={lookUp}
             disabled={lookingUp || busy}
-            className="border px-4 py-2 rounded hover:bg-gray-50 disabled:opacity-50"
+            className={btnOutline}
           >
             {lookingUp ? "Looking…" : "Look this up"}
           </button>
 
           {lookedUp && found.length === 0 && (
-            <p className="text-sm text-gray-600 mt-3">
+            <p className="text-sm text-ink-muted mt-3">
               Nothing found under that name.
             </p>
           )}
@@ -456,19 +481,19 @@ export function EntityDetailView({ id }: { id: string }) {
               {found.map((candidate) => (
                 <li
                   key={`${candidate.source}-${candidate.source_id}`}
-                  className="flex items-start justify-between gap-3 text-sm border rounded p-3"
+                  className="flex items-start justify-between gap-3 text-sm border border-line rounded-lg p-3"
                 >
                   <div>
-                    <p className="font-medium">{candidate.label}</p>
+                    <p className="font-medium text-ink">{candidate.label}</p>
                     {candidate.description && (
-                      <p className="text-gray-700">{candidate.description}</p>
+                      <p className="text-ink-muted mt-0.5">{candidate.description}</p>
                     )}
                   </div>
                   <button
                     type="button"
                     onClick={() => keep(candidate)}
                     disabled={busy}
-                    className="bg-indigo-600 text-white px-3 py-1 rounded hover:bg-indigo-700 disabled:opacity-50 shrink-0"
+                    className={`${btnSolid} shrink-0`}
                   >
                     Keep this
                   </button>
@@ -480,43 +505,43 @@ export function EntityDetailView({ id }: { id: string }) {
       )}
 
       {suggestions.length > 0 && (
-        <section className="border border-amber-200 bg-amber-50 rounded p-4">
-          <h2 className="font-semibold mb-1">Possible duplicate</h2>
+        <section className="bg-flash/10 border border-flash/30 rounded-2xl p-5">
+          <p className="font-semibold mb-1">Possible duplicate</p>
           {suggestions.map((s) => (
             <div
               key={`${s.source.id}-${s.target.id}`}
               className="flex items-center justify-between gap-3 text-sm"
             >
-              <span>
+              <span className="text-ink">
                 &ldquo;{s.source.canonical_name}&rdquo; may be the same as{" "}
                 &ldquo;{s.target.canonical_name}&rdquo;.
               </span>
               <button
                 onClick={() => doMerge(s)}
                 disabled={busy}
-                className="bg-amber-600 text-white px-3 py-1 rounded hover:bg-amber-700 disabled:opacity-50 shrink-0"
+                className={`${btnSolid} shrink-0`}
               >
                 {busy ? "Merging..." : "Merge them"}
               </button>
             </div>
           ))}
-          <p className="text-xs text-amber-800 mt-2">
+          <p className="text-xs text-ink-faint mt-2">
             Merging keeps the more-used name and is reversible.
           </p>
         </section>
       )}
 
-      <section className="border rounded p-4">
-        <h2 className="font-semibold mb-1">
+      <section className={actionBoxClass}>
+        <p className="font-semibold mb-1">
           Merge into another {kindLabel.toLowerCase()}
-        </h2>
-        <p className="text-sm text-gray-600 mb-2">
+        </p>
+        <p className="text-sm text-ink-muted mb-3">
           Moves every memory from this one to the entity you choose. Reversible.
         </p>
-        <div className="flex gap-2">
+        <div className="flex gap-2 flex-wrap">
           <select
             aria-label="Merge into"
-            className="border rounded p-2 flex-1"
+            className={`${fieldClass} flex-1 min-w-[160px]`}
             value={target}
             onChange={(event) => setTarget(event.target.value)}
           >
@@ -534,7 +559,7 @@ export function EntityDetailView({ id }: { id: string }) {
             type="button"
             onClick={mergeIntoChosen}
             disabled={busy || !target}
-            className="bg-indigo-600 text-white px-4 py-2 rounded hover:bg-indigo-700 disabled:opacity-50"
+            className={btnSolid}
           >
             Merge
           </button>
@@ -542,55 +567,53 @@ export function EntityDetailView({ id }: { id: string }) {
       </section>
 
       <section>
-        <h2 className="font-semibold mb-3">Memories</h2>
-        <ul className="space-y-2">
+        <p className="stamp text-ink-faint mb-3">Memories</p>
+        <ul className="space-y-2.5">
           {entity.memories.map((memory) => (
-            <li key={memory.id} className="border rounded p-3 bg-white">
-              <label className="flex items-start gap-2">
-                <input
-                  type="checkbox"
-                  className="mt-1"
-                  aria-label={memory.title || memory.summary || memory.id}
-                  checked={moving.has(memory.id)}
-                  onChange={() => toggleMoving(memory.id)}
-                />
-                <span>
-                  <span className="font-medium">
+            <li key={memory.id} className="border border-line rounded-xl p-3.5 bg-surface flex items-start gap-3">
+              <input
+                type="checkbox"
+                className="mt-1 accent-violet w-4 h-4"
+                aria-label={memory.title || memory.summary || memory.id}
+                checked={moving.has(memory.id)}
+                onChange={() => toggleMoving(memory.id)}
+              />
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="font-medium text-ink text-sm">
                     {memory.title || memory.summary || "Untitled memory"}
                   </span>
-                  <span className="block text-sm text-gray-500 mt-1">
-                    {formatWhen(memory)}
-                    {memory.role && (
-                      <span className="ml-2 text-xs bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded">
-                        {memory.role}
-                      </span>
-                    )}
-                  </span>
-                </span>
-              </label>
-              <Link
-                href={`/memories/${memory.id}`}
-                className="text-xs text-indigo-700 underline"
-              >
-                Open memory
-              </Link>
+                  {memory.role && (
+                    <span className="stamp text-violet bg-violet/15 px-2 py-0.5 rounded-full">
+                      {memory.role}
+                    </span>
+                  )}
+                </div>
+                <p className="stamp text-ink-faint mt-1">{formatWhen(memory)}</p>
+                <Link
+                  href={`/memories/${memory.id}`}
+                  className="text-xs text-flash font-semibold hover:underline inline-block mt-1.5"
+                >
+                  Open memory
+                </Link>
+              </div>
             </li>
           ))}
         </ul>
       </section>
 
-      <section className="border rounded p-4">
-        <h2 className="font-semibold mb-1">Split memories into a new entity</h2>
-        <p className="text-sm text-gray-600 mb-2">
+      <section className={actionBoxClass}>
+        <p className="font-semibold mb-1">Split memories into a new entity</p>
+        <p className="text-sm text-ink-muted mb-3">
           Tick the memories that are a different{" "}
           {kindLabel.toLowerCase()}. This is for when two of them were read as
           one, which undoing a merge cannot fix.
         </p>
-        <div className="flex gap-2">
+        <div className="flex gap-2 flex-wrap">
           <input
             aria-label="New entity name"
             placeholder="Name for the new entity"
-            className="border rounded p-2 flex-1"
+            className={`${fieldClass} flex-1 min-w-[160px]`}
             value={newName}
             onChange={(event) => setNewName(event.target.value)}
           />
@@ -598,7 +621,7 @@ export function EntityDetailView({ id }: { id: string }) {
             type="button"
             onClick={splitOut}
             disabled={busy || moving.size === 0 || !newName.trim()}
-            className="bg-indigo-600 text-white px-4 py-2 rounded hover:bg-indigo-700 disabled:opacity-50"
+            className={btnSolid}
           >
             Split out {moving.size > 0 ? `(${moving.size})` : ""}
           </button>

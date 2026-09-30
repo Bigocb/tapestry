@@ -108,8 +108,8 @@ export function TellingCapture() {
   return (
     <div className="space-y-6">
       {waiting.length > 0 ? (
-        <div className="border rounded p-4 bg-amber-50">
-          <h2 className="font-semibold text-amber-900">
+        <div className="border rounded p-4 bg-flash/10">
+          <h2 className="font-semibold text-flash">
             You have {waiting.length} unfinished telling
             {waiting.length === 1 ? "" : "s"}
           </h2>
@@ -118,7 +118,7 @@ export function TellingCapture() {
               <li key={telling.id}>
                 <Link
                   href={`/tellings/${telling.id}`}
-                  className="text-indigo-700 underline"
+                  className="text-flash underline"
                 >
                   {describe(telling)}
                 </Link>
@@ -142,7 +142,7 @@ export function TellingCapture() {
         <button
           type="submit"
           disabled={busy}
-          className="bg-indigo-600 text-white px-4 py-2 rounded hover:bg-indigo-700 disabled:opacity-50"
+          className="bg-flash text-flash-ink px-4 py-2 rounded hover:bg-flash-dark disabled:opacity-50"
         >
           {busy ? "Splitting…" : "Tell it"}
         </button>
@@ -155,8 +155,8 @@ export function TellingCapture() {
           disabled={busy}
           className={`px-6 py-3 rounded-full font-semibold disabled:opacity-50 ${
             recording
-              ? "bg-red-600 text-white animate-pulse"
-              : "bg-indigo-600 text-white hover:bg-indigo-700"
+              ? "bg-coral text-white animate-pulse"
+              : "bg-flash text-flash-ink hover:bg-flash-dark"
           }`}
         >
           {recording ? "Stop recording" : "Start recording"}
@@ -180,13 +180,13 @@ export function TellingCapture() {
         <button
           type="submit"
           disabled={busy || !audio}
-          className="border px-4 py-2 rounded hover:bg-gray-50 disabled:opacity-50"
+          className="border px-4 py-2 rounded hover:bg-bg disabled:opacity-50"
         >
           {busy ? "Uploading…" : "Upload recording"}
         </button>
       </form>
 
-      {error && <p className="text-red-600">{error}</p>}
+      {error && <p className="text-coral">{error}</p>}
     </div>
   );
 }

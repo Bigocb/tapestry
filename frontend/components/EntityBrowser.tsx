@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { api } from "@/lib/api";
+import { MapPinIcon } from "@heroicons/react/24/outline";
 
 export interface EntitySummary {
   id: string;
@@ -50,39 +51,54 @@ export function EntityBrowser({ kind, title }: { kind: string; title: string }) 
   }, [kind, title]);
 
   const plural = kind === "person" ? "people" : "places";
+  const isPerson = kind === "person";
 
   return (
-    <div className="max-w-3xl mx-auto">
-      <h1 className="text-2xl font-bold mb-2">{title}</h1>
-      <p className="text-sm text-gray-500 mb-6">
-        {total} {total === 1 ? plural.slice(0, -1) : plural}, most mentioned first.
+    <div>
+      <h1 className="text-3xl font-bold mb-2">{title}</h1>
+      <p className="stamp text-ink-muted mb-6">
+        {total} {total === 1 ? plural.slice(0, -1) : plural} &middot; most mentioned first
       </p>
 
-      {error && <p className="text-red-600 mb-4">{error}</p>}
-      {loading && <p>Loading...</p>}
+      {error && <p className="text-coral mb-4">{error}</p>}
+      {loading && <p className="text-ink-muted">Loading&hellip;</p>}
 
       {!loading && items.length === 0 && !error && (
-        <p className="text-gray-500">
+        <p className="text-ink-muted border border-dashed border-line rounded-lg p-6">
           No {plural} yet. Capture a memory mentioning one and it will appear here.
         </p>
       )}
 
-      <ul className="space-y-2">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
         {items.map((entity) => (
-          <li key={entity.id} className="border rounded bg-white">
-            <Link
-              href={`/entities/${entity.id}`}
-              className="flex items-center justify-between p-4 hover:bg-gray-50"
+          <Link
+            key={entity.id}
+            href={`/entities/${entity.id}`}
+            className="flex items-center gap-3 p-4 bg-surface border border-line rounded-lg hover:border-flash transition"
+          >
+            <span
+              className={`shrink-0 w-10 h-10 rounded-full flex items-center justify-center font-display text-lg ${
+                isPerson ? "bg-violet/15 text-violet" : "bg-mint/15 text-mint"
+              }`}
             >
-              <span className="font-medium">{entity.canonical_name}</span>
-              <span className="text-sm text-gray-500">
+              {isPerson ? (
+                entity.canonical_name.charAt(0).toUpperCase()
+              ) : (
+                <MapPinIcon className="w-5 h-5" />
+              )}
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="block font-medium text-ink truncate">
+                {entity.canonical_name}
+              </span>
+              <span className="block stamp text-ink-muted mt-0.5">
                 {entity.mention_count}{" "}
                 {entity.mention_count === 1 ? "memory" : "memories"}
               </span>
-            </Link>
-          </li>
+            </span>
+          </Link>
         ))}
-      </ul>
+      </div>
     </div>
   );
 }

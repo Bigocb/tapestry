@@ -19,14 +19,22 @@ export default function LoginPage() {
 
   return (
     <Layout>
-      <div className="max-w-md mx-auto mt-12">
-        <LoginForm />
-        <p className="mt-4 text-center text-sm">
-          Don&apos;t have an account?{" "}
-          <Link href="/signup" className="text-indigo-600 hover:underline">
-            Sign up
-          </Link>
-        </p>
+      <div className="min-h-screen flex items-center justify-center px-4">
+        <div className="w-full max-w-sm">
+          <div className="flex items-center justify-center gap-2 mb-6">
+            <span className="w-2.5 h-2.5 rounded-full bg-flash fab-pulse" />
+            <span className="font-display text-lg">Tapestry</span>
+          </div>
+          <div className="bg-surface border border-line rounded-2xl p-8">
+            <LoginForm />
+          </div>
+          <p className="mt-6 text-center text-sm text-ink-muted">
+            Don&apos;t have an account?{" "}
+            <Link href="/signup" className="text-flash hover:underline">
+              Sign up
+            </Link>
+          </p>
+        </div>
       </div>
     </Layout>
   );
