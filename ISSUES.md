@@ -1544,20 +1544,48 @@ telling produces several memories about one period *by design*. A single
 telling can now account for most of a group, and the grouping rules were
 written before that was true.
 
-#### Open questions
+#### What the data says
 
-- does grouping by label still say the right thing when one telling supplies
-  most of a group
-- should a telling's memories be recognisable on the timeline as coming from
-  one account
-- is the decade/range fallback still doing useful work, or papering over dates
-  the cursor now resolves properly
-- what the timeline should do with a memory that inherited only a telling's
-  frame — a label, and no date at all
+Measured against the real instance before designing anything:
+
+| | |
+|---|---|
+| **49 of 64** memories have a precise date | the timeline is mostly *exact*, not fuzzy |
+| **~34 distinct years**, 1–5 memories each | the problem is **length and sparseness**, not density |
+| **only 3** have a label and no date | mis-positioning is real but minor |
+| **4** have nothing at all | correctly in the review queue |
+| **55 of 82** carry a person, 55 a place | row detail is available to show |
+
+Labels in use include `Middle school`, `Middle school (1987-1990)`,
+`Middle School` **and** `1980s`, `early 1980s`, `late 1980s`.
+
+#### Decisions
+
+**Qualified periods group under their base.** `early 1980s`, `late 1980s` and
+`1980s` are one period seen from different angles, and today they produce three
+headings. They collapse to the decade; the row keeps the original wording. This
+is the same shape as the parenthetical case, which already works: *"Middle
+school (1987-1990)"* groups with *"Middle school"* today.
+
+**Built for navigating and for reading, evenly.** ~34 years with a handful of
+memories each is a long sparse scroll, so finding 1994 means passing twenty thin
+years. That argues for a way to jump. The rows themselves are also thin, which
+argues for filling them.
+
+**The clock goes.** Every exact-date row currently shows `12:00 AM` — the parse
+default, not a time anyone recorded. People and places replace it, since that is
+what makes a memory recognisable at a glance and the data is already there.
 
 #### Acceptance criteria
 
-Not written yet. Brainstorm first.
+- [ ] `early 1980s`, `late 1980s` and `1980s` group under one heading
+- [ ] The row still shows the memory's own wording
+- [ ] `Middle school (1987-1990)` still groups with `Middle school`
+- [ ] A row shows the people and places it mentions, not a clock time
+- [ ] A year-precision memory is not labelled "Approximate" — only decades,
+      ranges and labels are
+- [ ] A long sparse timeline can be navigated by period without scrolling its
+      whole length
 
 ---
 
