@@ -2,17 +2,17 @@
 
 > **Status snapshot** — last reconciled 2026-09-29 against `master` @ `4cb7df2`.
 >
-> **Done (verified by code + tests):** Issues 2, 3, 4, 5, 6, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 28, 29, 30
+> **Done (verified by code + tests):** Issues 2, 3, 4, 5, 6, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 28, 29, 30, 31
 > **Partial:** Issue 1 (Postgres is now provisioned, but **the pgvector extension is not installed** — the database has only `plpgsql`; the schema, indexes and cross-DB type decorators are in place), Issue 7 (embeddings work via Ollama with a deterministic local fallback; **similarity is still computed in Python** — no ANN index, because pgvector is absent)
 > **Superseded:** Issue 27 — the deployment target changed. MEMIND runs in Docker Compose with Postgres on the homelab box, published through Traefik and cloudflared at `memory.cloutier.work`. The service is live; the Render-specific acceptance criteria no longer apply.
-> **Not started:** Phase 9, Issues 31–36 (Tellings). Issues 28 (tracer bullet), 29 (segmentation) and 30 (the date cursor) are done, deployed and verified.
+> **Not started:** Phase 9, Issues 32–36 (Tellings). Issues 28–31 are done, deployed and verified: the tracer bullet, segmentation, the date cursor, and the telling's own frame.
 >
 > **Key deviations from original plan:**
 > - **Storage:** production runs on Postgres 16 in Docker on the homelab box. SQLite (`memind.db`) remains the local-dev default.
 > - **Search:** full-text + semantic ranking done in Python over fetched rows, not Postgres `tsquery`/pgvector ANN.
 > - **Agents:** Ollama Cloud (`ollama.com/v1`, `gemma4:31b`) is primary. Story generation implements a Claude Opus fallback (`ANTHROPIC_API_KEY`), gated on a response-quality check; capture/refinement/enrichment are Ollama-only.
 > - **Transcription:** local `faster-whisper`; Issue 4's backend is wired. A 501 is still returned when the model or its dependency is genuinely unavailable — that is error handling, not the old stub.
-> - **Tests:** 418 backend passing, 1 skipped (the pgvector extension check) on in-memory SQLite, plus 21 frontend tests via vitest/jsdom.
+> - **Tests:** 427 backend passing, 1 skipped (the pgvector extension check) on in-memory SQLite, plus 22 frontend tests via vitest/jsdom.
 > - **Beyond the plan:** first-class entities, the privacy lock, the review queue and fuzzy dates all shipped outside the numbered issues, so this list understates the delivered surface.
 >
 > **Remaining work:** the pgvector half of Issue 1 (and the ANN search it would unblock in Issue 7), Phase 9 (Tellings, Issues 28–35), and active iteration on capture/parsing quality (Issues 4–6 area).
@@ -1094,12 +1094,39 @@ genuinely no signal at all anywhere.
 
 #### Acceptance criteria
 
-- [ ] A telling can carry a frame date and label
-- [ ] Undated segments inherit the telling's frame as a date label
-- [ ] Inherited segments are not queued for review
-- [ ] A segment with no signal and no telling frame is still queued for review
-- [ ] Committed memories carry the inherited label, and the timeline groups
+- [x] A telling can carry a frame date and label
+- [x] Undated segments inherit the telling's frame as a date label
+- [x] Inherited segments are not queued for review
+- [x] A segment with no signal and no telling frame is still queued for review
+- [x] Committed memories carry the inherited label, and the timeline groups
       them accordingly
+
+> **Status: DONE.** Verified live: the non-linear account yields frame
+> "first month in high school", carried by all four segments. Its frame_date is
+> null, and honestly so — that account never states a year.
+>
+> The frame is *derived* rather than asked for: the segmenter already applies a
+> period's wording to every memory it covers, so the label the segments most
+> share is the frame. That needed no prompt change, and it handles the case
+> actually observed, where one segment came back unlabelled while the rest
+> shared a period — derivation still finds the frame and the odd one inherits it.
+>
+> Ordering matters and is deliberate: the cursor runs first and the frame
+> second, so a precise answer always beats a vague one. Only what is still
+> undated inherits.
+>
+> The review-queue and timeline criteria needed no new logic — `apply_review_flags`
+> already counts a label as a time signal, and `commit_telling` already copies
+> the label onto the memory. Both are now pinned by tests rather than assumed.
+>
+> `segment_transcript` returns a `SegmentationResult` carrying the frame beside
+> the segments, since a frame belongs to the telling and not to any one memory.
+> The fallback path is dated the same way, so a model outage costs the split but
+> not the dates.
+>
+> Not claimed: a `frame_date` on a period-of-life telling that never states a
+> year. There is no honest value for it, and inventing one is the bug Issue 29
+> already fixed once.
 
 ---
 
