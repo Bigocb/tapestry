@@ -71,3 +71,87 @@ class TestFindPlace:
 
         assert match.label == "A Place"
         assert match.description is None
+
+
+class TestFuzzyPlaceMatching:
+    """Sensor: a generic venue word should not hide the place behind it.
+
+    "Mission Valley Theater" retrieves "Mission Valley Cinemas" only when the
+    generic word is dropped and the distinctive part searched on its own. This
+    is the limitation met in practice, not a hypothetical.
+    """
+
+    @pytest.mark.asyncio
+    async def test_the_exact_wording_is_tried_first(self, monkeypatch):
+        calls = []
+
+        async def fake_search(name, limit):
+            calls.append(name)
+            if name == "Mission Valley Theater":
+                return []
+            return SEARCH_RESPONSE["search"]
+
+        monkeypatch.setattr(lookup, "_search", fake_search)
+
+        match = await lookup.find_place("Mission Valley Theater")
+
+        assert match.label == "Mission Valley Cinemas"
+        assert calls[0] == "Mission Valley Theater"
+        assert "Mission Valley" in calls
+
+    @pytest.mark.asyncio
+    async def test_irrelevant_results_trigger_a_broader_query(self, monkeypatch):
+        async def fake_search(name, limit):
+            if name == "Mission Valley Theater":
+                return [{"id": "Q999", "label": "Something Else Entirely"}]
+            return SEARCH_RESPONSE["search"]
+
+        monkeypatch.setattr(lookup, "_search", fake_search)
+
+        matches = await lookup.search_places("Mission Valley Theater")
+
+        assert matches[0].label == "Mission Valley Cinemas"
+
+    @pytest.mark.asyncio
+    async def test_a_relevant_direct_hit_is_not_broadened(self, monkeypatch):
+        calls = []
+
+        async def fake_search(name, limit):
+            calls.append(name)
+            return SEARCH_RESPONSE["search"]
+
+        monkeypatch.setattr(lookup, "_search", fake_search)
+
+        await lookup.search_places("Mission Valley Cinemas")
+
+        assert calls == ["Mission Valley Cinemas"]
+
+    @pytest.mark.asyncio
+    async def test_a_name_without_a_generic_word_is_queried_as_written(
+        self, monkeypatch
+    ):
+        calls = []
+
+        async def fake_search(name, limit):
+            calls.append(name)
+            return []
+
+        monkeypatch.setattr(lookup, "_search", fake_search)
+
+        assert await lookup.search_places("Raleigh") == []
+        assert calls == ["Raleigh"]
+
+    @pytest.mark.asyncio
+    async def test_the_direct_results_survive_when_nothing_better_is_found(
+        self, monkeypatch
+    ):
+        async def fake_search(name, limit):
+            if name == "Mission Valley Theater":
+                return [{"id": "Q999", "label": "Something Else Entirely"}]
+            return []
+
+        monkeypatch.setattr(lookup, "_search", fake_search)
+
+        matches = await lookup.search_places("Mission Valley Theater")
+
+        assert [m.source_id for m in matches] == ["Q999"]
