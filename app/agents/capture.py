@@ -104,8 +104,13 @@ def _ollama_config() -> tuple[str, str, Optional[str]]:
     return api_base, model, api_key
 
 
-async def _call_ollama_chat(prompt: str) -> dict:
+async def _call_ollama_chat(
+    prompt: str, system_prompt: str = CAPTURE_SYSTEM_PROMPT
+) -> dict:
     """Call the Ollama Chat API and return the raw message content as a dict.
+
+    ``system_prompt`` defaults to the capture instructions; other agents in the
+    capture family pass their own through the same plumbing.
 
     Raises RuntimeError on network or parsing failures so the caller can fall back.
     """
@@ -126,7 +131,7 @@ async def _call_ollama_chat(prompt: str) -> dict:
     payload = {
         "model": model,
         "messages": [
-            {"role": "system", "content": CAPTURE_SYSTEM_PROMPT},
+            {"role": "system", "content": system_prompt},
             {"role": "user", "content": prompt},
         ],
         "response_format": {"type": "json_object"},

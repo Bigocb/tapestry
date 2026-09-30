@@ -15,6 +15,7 @@ from sqlalchemy.orm import sessionmaker
 from app.main import app
 from app.db import Base, User, get_db
 from app.security import hash_password
+from app.agents.telling import ProposedSegment
 from app.models.schemas import StructuredMemory, EntityData
 
 
@@ -87,24 +88,31 @@ def setup_users(test_db):
 
 
 @pytest.fixture
-def fake_structure_memory(monkeypatch):
-    """Replace the Capture Agent with a deterministic stub.
+def fake_segmentation(monkeypatch):
+    """Replace the segmentation pass with a deterministic stub.
 
-    The telling pipeline structures its segments once, on the way in, so the
-    stub keeps tests off the network and makes the derived title predictable.
+    The telling pipeline splits the account once, on the way in, so the stub
+    keeps tests off the network and makes the resulting segment predictable.
+    It returns a single segment covering the whole account, which is the
+    fallback behaviour a model outage produces.
     """
 
-    async def _fake(raw_input: str):
-        return StructuredMemory(
-            title="Structured: " + raw_input[:50],
-            summary=raw_input,
-            entities=[EntityData(type="concept", value="test")],
-            mood="neutral",
-            importance_level=5,
-            initial_tags=["test"],
-        )
+    async def _fake(transcript: str):
+        return [
+            ProposedSegment(
+                text=transcript,
+                structured=StructuredMemory(
+                    title="Structured: " + transcript[:50],
+                    summary=transcript,
+                    entities=[EntityData(type="concept", value="test")],
+                    mood="neutral",
+                    importance_level=5,
+                    initial_tags=["test"],
+                ),
+            )
+        ]
 
-    monkeypatch.setattr("app.routes.tellings.structure_memory", _fake)
+    monkeypatch.setattr("app.routes.tellings.segment_transcript", _fake)
 
 
 @pytest.fixture
@@ -125,11 +133,63 @@ def _auth(token: str) -> dict:
     return {"Authorization": f"Bearer {token}"}
 
 
+def _structured_memory(title: str) -> StructuredMemory:
+    return StructuredMemory(
+        title=title,
+        summary=title,
+        entities=[],
+        importance_level=5,
+        initial_tags=[],
+    )
+
+
+class TestSegmentedCapture:
+    """One recounting becomes one row per proposed memory."""
+
+    async def test_stores_one_row_per_proposed_segment(
+        self, client, setup_users, get_auth_token, monkeypatch
+    ):
+        await setup_users()
+        token = get_auth_token("alice", "password123")
+
+        async def fake_segment(transcript: str):
+            return [
+                ProposedSegment(
+                    text="In the summer of 1985 we drove down to Florida.",
+                    structured=_structured_memory("Trip to Florida"),
+                ),
+                ProposedSegment(
+                    text="The next day we went to Disney.",
+                    structured=_structured_memory("Disney"),
+                ),
+            ]
+
+        monkeypatch.setattr("app.routes.tellings.segment_transcript", fake_segment)
+
+        response = client.post(
+            "/api/tellings",
+            json={"raw_transcript": TRANSCRIPT},
+            headers=_auth(token),
+        )
+
+        assert response.status_code == 201
+        segments = response.json()["segments"]
+        assert [segment["text"] for segment in segments] == [
+            "In the summer of 1985 we drove down to Florida.",
+            "The next day we went to Disney.",
+        ]
+        assert [segment["ordinal"] for segment in segments] == [0, 1]
+        assert [segment["title"] for segment in segments] == [
+            "Trip to Florida",
+            "Disney",
+        ]
+
+
 class TestCaptureTelling:
     """Tellings are submitted and come back as a reviewable draft."""
 
     async def test_capturing_a_typed_telling_proposes_one_segment(
-        self, client, setup_users, get_auth_token, fake_structure_memory
+        self, client, setup_users, get_auth_token, fake_segmentation
     ):
         await setup_users()
         token = get_auth_token("alice", "password123")
@@ -147,7 +207,7 @@ class TestCaptureTelling:
         assert body["segments"][0]["text"] == TRANSCRIPT
 
     async def test_a_telling_can_be_fetched_with_its_segments(
-        self, client, setup_users, get_auth_token, fake_structure_memory
+        self, client, setup_users, get_auth_token, fake_segmentation
     ):
         await setup_users()
         token = get_auth_token("alice", "password123")
@@ -168,7 +228,7 @@ class TestCaptureTelling:
         assert body["segments"][0]["ordinal"] == 0
 
     async def test_a_proposed_segment_carries_structured_content(
-        self, client, setup_users, get_auth_token, fake_structure_memory
+        self, client, setup_users, get_auth_token, fake_segmentation
     ):
         await setup_users()
         token = get_auth_token("alice", "password123")
@@ -185,7 +245,7 @@ class TestCaptureTelling:
         assert segment["status"] == "proposed"
 
     async def test_a_segment_can_be_edited_before_commit(
-        self, client, setup_users, get_auth_token, fake_structure_memory
+        self, client, setup_users, get_auth_token, fake_segmentation
     ):
         await setup_users()
         token = get_auth_token("alice", "password123")
@@ -219,7 +279,7 @@ class TestCaptureTelling:
         assert segment["summary"] == "My summary"
 
     async def test_a_segment_can_be_rejected(
-        self, client, setup_users, get_auth_token, fake_structure_memory
+        self, client, setup_users, get_auth_token, fake_segmentation
     ):
         await setup_users()
         token = get_auth_token("alice", "password123")
@@ -241,7 +301,7 @@ class TestCaptureTelling:
         assert response.json()["status"] == "rejected"
 
     async def test_an_unknown_segment_status_is_rejected(
-        self, client, setup_users, get_auth_token, fake_structure_memory
+        self, client, setup_users, get_auth_token, fake_segmentation
     ):
         await setup_users()
         token = get_auth_token("alice", "password123")
@@ -266,7 +326,7 @@ class TestCommitTelling:
     """Committing turns accepted segments into real memories."""
 
     async def test_committing_creates_a_memory_linked_to_the_telling(
-        self, client, setup_users, get_auth_token, fake_structure_memory
+        self, client, setup_users, get_auth_token, fake_segmentation
     ):
         await setup_users()
         token = get_auth_token("alice", "password123")
@@ -301,19 +361,24 @@ class TestCommitTelling:
 
         calls = []
 
-        async def _counting_structure(raw_input: str):
-            calls.append(raw_input)
-            return StructuredMemory(
-                title="Agent title",
-                summary=raw_input,
-                entities=[],
-                mood="neutral",
-                importance_level=5,
-                initial_tags=["test"],
-            )
+        async def _counting_segmentation(transcript: str):
+            calls.append(transcript)
+            return [
+                ProposedSegment(
+                    text=transcript,
+                    structured=StructuredMemory(
+                        title="Agent title",
+                        summary=transcript,
+                        entities=[],
+                        mood="neutral",
+                        importance_level=5,
+                        initial_tags=["test"],
+                    ),
+                )
+            ]
 
         monkeypatch.setattr(
-            "app.routes.tellings.structure_memory", _counting_structure
+            "app.routes.tellings.segment_transcript", _counting_segmentation
         )
 
         draft = client.post(
@@ -348,19 +413,26 @@ class TestCommitTelling:
         await setup_users()
         token = get_auth_token("alice", "password123")
 
-        async def _structured(raw_input: str):
-            return StructuredMemory(
-                title="Trip to Raleigh",
-                summary=raw_input,
-                entities=[EntityData(type="person", value="Dave")],
-                mood="happy",
-                importance_level=7,
-                initial_tags=["trip"],
-                event_date=datetime(1985, 7, 1),
-                date_precision="year",
-            )
+        async def _segmentation(transcript: str):
+            return [
+                ProposedSegment(
+                    text=transcript,
+                    structured=StructuredMemory(
+                        title="Trip to Raleigh",
+                        summary=transcript,
+                        entities=[EntityData(type="person", value="Dave")],
+                        mood="happy",
+                        importance_level=7,
+                        initial_tags=["trip"],
+                        event_date=datetime(1985, 7, 1),
+                        date_precision="year",
+                    ),
+                )
+            ]
 
-        monkeypatch.setattr("app.routes.tellings.structure_memory", _structured)
+        monkeypatch.setattr(
+            "app.routes.tellings.segment_transcript", _segmentation
+        )
 
         draft = client.post(
             "/api/tellings",
@@ -393,17 +465,24 @@ class TestDraftIsolation:
     """
 
     async def _draft(self, client, token, monkeypatch):
-        async def _structured(raw_input: str):
-            return StructuredMemory(
-                title="Trip to Raleigh",
-                summary=raw_input,
-                entities=[EntityData(type="person", value="Dave")],
-                mood="happy",
-                importance_level=7,
-                initial_tags=["trip", "raleigh"],
-            )
+        async def _segmentation(transcript: str):
+            return [
+                ProposedSegment(
+                    text=transcript,
+                    structured=StructuredMemory(
+                        title="Trip to Raleigh",
+                        summary=transcript,
+                        entities=[EntityData(type="person", value="Dave")],
+                        mood="happy",
+                        importance_level=7,
+                        initial_tags=["trip", "raleigh"],
+                    ),
+                )
+            ]
 
-        monkeypatch.setattr("app.routes.tellings.structure_memory", _structured)
+        monkeypatch.setattr(
+            "app.routes.tellings.segment_transcript", _segmentation
+        )
         response = client.post(
             "/api/tellings",
             json={"raw_transcript": TRANSCRIPT},
@@ -451,7 +530,7 @@ class TestTellingReviewAndOwnership:
     """Rejection excludes a segment; a telling belongs to one user."""
 
     async def test_a_rejected_segment_produces_no_memory(
-        self, client, setup_users, get_auth_token, fake_structure_memory
+        self, client, setup_users, get_auth_token, fake_segmentation
     ):
         await setup_users()
         token = get_auth_token("alice", "password123")
@@ -476,7 +555,7 @@ class TestTellingReviewAndOwnership:
         assert client.get("/api/memories", headers=_auth(token)).json() == []
 
     async def test_a_telling_is_visible_only_to_its_owner(
-        self, client, setup_users, get_auth_token, fake_structure_memory
+        self, client, setup_users, get_auth_token, fake_segmentation
     ):
         await setup_users()
         alice = get_auth_token("alice", "password123")
@@ -500,7 +579,7 @@ class TestTellingReviewAndOwnership:
         )
 
     async def test_committing_twice_is_refused(
-        self, client, setup_users, get_auth_token, fake_structure_memory
+        self, client, setup_users, get_auth_token, fake_segmentation
     ):
         await setup_users()
         token = get_auth_token("alice", "password123")

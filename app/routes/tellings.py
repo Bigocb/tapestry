@@ -13,7 +13,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.agents.capture import structure_memory
+from app.agents.telling import segment_transcript
 from app.db import get_db, Memory, Telling, TellingSegment, User
 from app.db.entities import sync_memory_entities
 from app.db.memory_writes import apply_memory_date_fields, apply_review_flags
@@ -106,24 +106,26 @@ async def capture_telling(
     db.add(telling)
     await db.flush()
 
-    # Structured once, on the way in. Commit must not re-run this: the
-    # reviewed content on the segment is authoritative.
-    structured = await structure_memory(payload.raw_transcript)
+    # Split once, on the way in. Commit must not re-run this: the reviewed
+    # content on each segment is authoritative.
+    proposed = await segment_transcript(payload.raw_transcript)
 
-    db.add(
-        TellingSegment(
-            telling_id=telling.id,
-            user_id=current_user.id,
-            ordinal=0,
-            text=payload.raw_transcript,
-            structured_content=structured.model_dump(mode="json"),
-            event_date=structured.event_date,
-            date_precision=structured.date_precision,
-            event_date_end=structured.event_date_end,
-            date_label=structured.date_label,
-            status=PROPOSED,
+    for ordinal, segment in enumerate(proposed):
+        structured = segment.structured
+        db.add(
+            TellingSegment(
+                telling_id=telling.id,
+                user_id=current_user.id,
+                ordinal=ordinal,
+                text=segment.text,
+                structured_content=structured.model_dump(mode="json"),
+                event_date=structured.event_date,
+                date_precision=structured.date_precision,
+                event_date_end=structured.event_date_end,
+                date_label=structured.date_label,
+                status=PROPOSED,
+            )
         )
-    )
     await db.commit()
 
     return _telling_response(await _load_telling(db, current_user.id, telling.id))
