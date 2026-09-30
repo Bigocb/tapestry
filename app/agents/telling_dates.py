@@ -207,17 +207,25 @@ def resolve_telling_dates(
         if known is not None and index < len(known):
             known_here = known[index]
 
-        # The segmenter gave this memory a date: keep it, and anchor on it.
+        # A relative phrase belongs to the cursor, not the segmenter. Only the
+        # cursor knows what came before: shown "The next day" on its own, a
+        # segmenter answers with the nearest month it can see, which is the
+        # month before rather than the day after.
+        offset = _relative_offset(text)
+        if offset is not None and cursor is not None:
+            cursor = _shift(cursor, offset)
+            resolved.append(cursor)
+            continue
+
+        # Otherwise the segmenter's own date wins: it read the whole account.
         if known_here is not None and known_here.event_date is not None:
             cursor = known_here
             resolved.append(known_here)
             continue
 
-        # The segmenter looked and answered "no date". That is not the same as
-        # "nothing here": it cannot resolve "the next day" on its own, which is
-        # the cursor's whole job. But it does mean the text's *stated* dates
-        # must be left alone — re-deriving them puts back the incidental years
-        # its guard removed ("early 2000s throwbacks").
+        # It looked and answered "no date". That is not "nothing here", but it
+        # does mean the text's *stated* dates are left alone — re-deriving them
+        # puts back the incidental years its guard just removed.
         settled_as_undated = known_here is not None
 
         if not settled_as_undated:
@@ -226,12 +234,6 @@ def resolve_telling_dates(
                 cursor = stated
                 resolved.append(stated)
                 continue
-
-        offset = _relative_offset(text)
-        if offset is not None and cursor is not None:
-            cursor = _shift(cursor, offset)
-            resolved.append(cursor)
-            continue
 
         resolved.append(known_here if known_here is not None else ResolvedDate())
 

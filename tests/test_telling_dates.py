@@ -7,6 +7,7 @@ tomorrow — and a year stated once may govern several memories that follow.
 
 from datetime import datetime, timezone
 
+from app.agents.capture import ResolvedDate
 from app.agents.telling_dates import resolve_telling_dates
 
 
@@ -90,3 +91,22 @@ class TestResolveTellingDates:
 
         assert dates[0].event_date is None
         assert dates[0].precision == "unknown"
+
+    def test_a_relative_phrase_wins_over_a_guessed_date(self):
+        """"The next day" is the cursor's to resolve, not the segmenter's.
+
+        A segmenter seeing only this span cannot know what it follows, so it
+        tends to answer with the month it can see. The cursor can do better.
+        """
+        dates = resolve_telling_dates(
+            [
+                "In August 2003 I started high school.",
+                "The next day my grandmother arrived.",
+            ],
+            known=[
+                ResolvedDate(event_date=datetime(2003, 8, 1), precision="month"),
+                ResolvedDate(event_date=datetime(2003, 8, 1), precision="month"),
+            ],
+        )
+
+        assert dates[1].event_date == datetime(2003, 8, 2)
