@@ -66,6 +66,8 @@ export function EntityDetailView({ id }: { id: string }) {
   const [busy, setBusy] = useState(false);
   const [lastMerge, setLastMerge] = useState<AppliedMerge | null>(null);
   const [notice, setNotice] = useState("");
+  const [candidates, setCandidates] = useState<EntitySummaryBase[]>([]);
+  const [target, setTarget] = useState("");
 
   const load = useCallback(() => {
     return api
@@ -102,6 +104,54 @@ export function EntityDetailView({ id }: { id: string }) {
       active = false;
     };
   }, [id, load]);
+
+  useEffect(() => {
+    if (!entity) return;
+    let active = true;
+
+    // Anything of the same kind can be a target. Until this existed the only
+    // reachable merges were the pairs the automation proposed, so a duplicate
+    // it had not noticed could not be merged at all.
+    api
+      .getEntities(entity.kind, 200, 0)
+      .then((data: { items?: EntitySummaryBase[] }) => {
+        if (!active) return;
+        setCandidates(
+          (data?.items ?? []).filter((item) => item.id !== entity.id)
+        );
+      })
+      .catch(() => {
+        /* the picker is optional */
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [entity]);
+
+  const mergeIntoChosen = async () => {
+    if (!entity || !target) return;
+    const chosen = candidates.find((item) => item.id === target);
+    const name = chosen?.canonical_name ?? "the other entity";
+
+    setBusy(true);
+    try {
+      const result = await api.mergeEntities(entity.id, target);
+      setLastMerge({
+        merge_id: result.merge_id,
+        source_id: entity.id,
+        target_id: target,
+        source_name: entity.canonical_name,
+        target_name: name,
+      });
+      setNotice(`Merged ${entity.canonical_name} into ${name}.`);
+      setTarget("");
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Merge failed");
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const doMerge = async (suggestion: MergeSuggestion) => {
     if (!entity) return;
@@ -227,6 +277,41 @@ export function EntityDetailView({ id }: { id: string }) {
           </p>
         </section>
       )}
+
+      <section className="border rounded p-4">
+        <h2 className="font-semibold mb-1">
+          Merge into another {kindLabel.toLowerCase()}
+        </h2>
+        <p className="text-sm text-gray-600 mb-2">
+          Moves every memory from this one to the entity you choose. Reversible.
+        </p>
+        <div className="flex gap-2">
+          <select
+            aria-label="Merge into"
+            className="border rounded p-2 flex-1"
+            value={target}
+            onChange={(event) => setTarget(event.target.value)}
+          >
+            <option value="">Choose an entity…</option>
+            {candidates.map((candidate) => (
+              <option key={candidate.id} value={candidate.id}>
+                {candidate.canonical_name}
+                {candidate.mention_count
+                  ? ` (${candidate.mention_count})`
+                  : ""}
+              </option>
+            ))}
+          </select>
+          <button
+            type="button"
+            onClick={mergeIntoChosen}
+            disabled={busy || !target}
+            className="bg-indigo-600 text-white px-4 py-2 rounded hover:bg-indigo-700 disabled:opacity-50"
+          >
+            Merge
+          </button>
+        </div>
+      </section>
 
       <section>
         <h2 className="font-semibold mb-3">Memories</h2>
