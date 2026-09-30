@@ -376,6 +376,30 @@ class JobStatus(Base):
     )
 
 
+class PasswordResetToken(Base):
+    """A single-use, short-lived token for choosing a new password.
+
+    Stored **hashed**. The raw value is shown once, to the operator, and a
+    stolen database should not hand anyone a working link. A plain hash is
+    right here where bcrypt would not be: the token is 32 bytes of randomness,
+    so there is nothing to brute-force.
+    """
+
+    __tablename__ = "password_reset_tokens"
+
+    id = Column(GUID(), primary_key=True, default=uuid.uuid4)
+    user_id = Column(GUID(), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+
+    token_hash = Column(String(64), nullable=False, index=True)
+    expires_at = Column(TIMESTAMP, nullable=False)
+    # Non-null means it has been spent, successfully or not.
+    used_at = Column(TIMESTAMP, nullable=True)
+
+    created_at = Column(TIMESTAMP, server_default=func.now(), nullable=False)
+
+    __table_args__ = (Index("idx_password_reset_user", "user_id"),)
+
+
 class Telling(Base):
     """One act of recounting.
 

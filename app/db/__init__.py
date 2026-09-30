@@ -9,6 +9,7 @@ from .models import (
     EntityMerge,
     Story,
     JobStatus,
+    PasswordResetToken,
     Telling,
     TellingSegment,
 )
@@ -27,6 +28,7 @@ __all__ = [
     "EntityMerge",
     "Story",
     "JobStatus",
+    "PasswordResetToken",
     "Telling",
     "TellingSegment",
     "as_utc",

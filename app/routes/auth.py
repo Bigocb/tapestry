@@ -1,13 +1,30 @@
 """Authentication routes (register, login, token refresh)."""
 
-from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from datetime import datetime, timedelta, timezone
 from uuid import uuid4
+
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import func, or_, select
+from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel
 
-from app.db import User, get_db
-from app.models.schemas import UserCreate, UserLogin, UserResponse, TokenResponse
+from app.db import PasswordResetToken, User, as_utc, get_db
+from app.models.schemas import (
+    ForgotPasswordRequest,
+    ResetPasswordRequest,
+    TokenResponse,
+    UserCreate,
+    UserLogin,
+    UserResponse,
+)
+from app.reset import (
+    create_token,
+    deliver,
+    expiry_from_now,
+    hash_token,
+    reset_link,
+    reset_requests_per_hour,
+)
 from app.security import (
     hash_password,
     verify_password,
@@ -18,6 +35,118 @@ from app.security import (
 )
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+
+
+# The same answer whether or not the account exists. Anything else would let
+# anyone check who has an account here.
+RESET_REQUESTED = (
+    "If that account exists, a reset link has been created."
+)
+
+
+async def _find_user_by_identifier(db: AsyncSession, identifier: str):
+    """Look an account up by username or email, case-insensitively."""
+    needle = identifier.strip().lower()
+    result = await db.execute(
+        select(User).where(
+            or_(
+                func.lower(User.username) == needle,
+                func.lower(User.email) == needle,
+            )
+        )
+    )
+    return result.scalar_one_or_none()
+
+
+@router.post("/forgot-password")
+async def forgot_password(
+    payload: ForgotPasswordRequest,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Start a password reset.
+
+    Always answers identically, and never with the token. The link goes to the
+    operator — by email when SMTP is configured, otherwise to the log.
+    """
+    user = await _find_user_by_identifier(db, payload.identifier)
+
+    if user is not None:
+        window_start = datetime.now(timezone.utc) - timedelta(hours=1)
+        recent = await db.scalar(
+            select(func.count())
+            .select_from(PasswordResetToken)
+            .where(
+                PasswordResetToken.user_id == user.id,
+                PasswordResetToken.created_at >= window_start.replace(tzinfo=None),
+            )
+        )
+
+        # Rate limited per account: quietly skip rather than say so, since
+        # saying so would reveal that the account exists.
+        if (recent or 0) < reset_requests_per_hour():
+            raw, hashed = create_token()
+            db.add(
+                PasswordResetToken(
+                    user_id=user.id,
+                    token_hash=hashed,
+                    expires_at=expiry_from_now(),
+                )
+            )
+            await db.commit()
+            deliver(user.email, reset_link(raw))
+
+    return {"detail": RESET_REQUESTED}
+
+
+@router.post("/reset-password")
+async def reset_password(
+    payload: ResetPasswordRequest,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Spend a reset link, and close every other outstanding one.
+
+    An attacker who requested their own link earlier must not still have a way
+    in after the real owner has reset their password.
+    """
+    result = await db.execute(
+        select(PasswordResetToken).where(
+            PasswordResetToken.token_hash == hash_token(payload.token)
+        )
+    )
+    token = result.scalar_one_or_none()
+
+    if token is None or token.used_at is not None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="That reset link is not valid.",
+        )
+
+    if as_utc(token.expires_at) < datetime.now(timezone.utc):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="That reset link has expired.",
+        )
+
+    user = await db.get(User, token.user_id)
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="That reset link is not valid.",
+        )
+
+    user.password_hash = hash_password(payload.new_password)
+
+    now = datetime.now(timezone.utc)
+    outstanding = await db.execute(
+        select(PasswordResetToken).where(
+            PasswordResetToken.user_id == user.id
+        )
+    )
+    for other in outstanding.scalars():
+        other.used_at = now
+
+    await db.commit()
+    return {"detail": "Your password has been changed."}
 
 
 @router.get("/session-config")

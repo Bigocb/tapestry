@@ -11,6 +11,17 @@ vi.mock("@/lib/api", () => ({
   api: { login: vi.fn(), register: vi.fn() },
 }));
 
+// A plain anchor: next/link wants an app router that a bare render has not got.
+vi.mock("next/link", () => ({
+  default: ({
+    href,
+    children,
+  }: {
+    href: string;
+    children: React.ReactNode;
+  }) => <a href={href}>{children}</a>,
+}));
+
 describe("auth forms on a phone", () => {
   it("does not let iOS capitalise the login username", () => {
     // iOS capitalises a plain text input by default, so "bigocb" is sent as

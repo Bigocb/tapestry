@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useState } from "react";
 import { useAuth } from "@/lib/auth";
 import { api } from "@/lib/api";
@@ -49,6 +50,12 @@ export function LoginForm() {
       >
         Login
       </button>
+      <Link
+        href="/forgot-password"
+        className="block text-sm text-indigo-700 underline"
+      >
+        Forgot your password?
+      </Link>
     </form>
   );
 }

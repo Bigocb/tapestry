@@ -571,6 +571,32 @@ class ErrorResponse(BaseModel):
 
 
 # ============================================================================
+# PASSWORD RESET MODELS
+# ============================================================================
+
+
+class ForgotPasswordRequest(BaseModel):
+    """Ask for a reset link, by username or email."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    identifier: str = Field(..., min_length=1, max_length=255)
+
+
+class ResetPasswordRequest(BaseModel):
+    """Spend a reset link on a new password.
+
+    The length rule matches registration, so a password cannot be reset to
+    something signup would have refused.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    token: str = Field(..., min_length=1)
+    new_password: str = Field(..., min_length=8)
+
+
+# ============================================================================
 # TELLING MODELS
 # ============================================================================
 
