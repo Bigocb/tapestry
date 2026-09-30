@@ -622,6 +622,21 @@ class TellingSegmentUpdate(BaseModel):
     date_label: Optional[str] = Field(None, max_length=120)
 
 
+class TellingSummary(BaseModel):
+    """Enough of a telling to find it again, and to tell drafts from the rest."""
+
+    id: UUID
+    status: str
+    input_type: str
+    frame_label: Optional[str] = None
+    raw_transcript: str
+    segment_count: int
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
 class TellingTranscriptUpdate(BaseModel):
     """A corrected transcript. Re-splitting replaces the whole proposed split."""
 

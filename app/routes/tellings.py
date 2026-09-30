@@ -37,6 +37,7 @@ from app.models.schemas import (
     TellingSegmentResponse,
     TellingSegmentSplit,
     TellingSegmentUpdate,
+    TellingSummary,
     TellingTranscriptUpdate,
 )
 
@@ -219,6 +220,42 @@ async def update_telling_transcript(
     await db.commit()
 
     return _telling_response(await _load_telling(db, current_user.id, telling_id))
+
+
+@router.get(
+    "/tellings",
+    response_model=list[TellingSummary],
+    summary="List your tellings",
+    description="Find an unfinished telling, or see one that failed.",
+)
+async def list_tellings(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[TellingSummary]:
+    """Everything this user has told, newest first.
+
+    Deliberately includes failures. A telling that failed to transcribe holds
+    nothing but a reason, which is exactly why hiding it would be wrong.
+    """
+    result = await db.execute(
+        select(Telling)
+        .where(Telling.user_id == current_user.id)
+        .options(selectinload(Telling.segments))
+        .order_by(Telling.created_at.desc())
+    )
+
+    return [
+        TellingSummary(
+            id=telling.id,
+            status=telling.status,
+            input_type=telling.input_type,
+            frame_label=telling.frame_label,
+            raw_transcript=telling.raw_transcript,
+            segment_count=len(telling.segments),
+            created_at=telling.created_at,
+        )
+        for telling in result.scalars().all()
+    ]
 
 
 @router.post(

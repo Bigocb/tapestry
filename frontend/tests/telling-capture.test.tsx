@@ -1,6 +1,6 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { TellingCapture } from "@/components/TellingCapture";
 import { api, type Telling } from "@/lib/api";
@@ -13,10 +13,16 @@ vi.mock("next/navigation", () => ({
 
 vi.mock("@/lib/api", () => ({
   api: {
+    getTellings: vi.fn(),
     createTelling: vi.fn(),
     createVoiceTelling: vi.fn(),
   },
 }));
+
+beforeEach(() => {
+  // Nothing waiting by default; individual tests opt in.
+  vi.mocked(api.getTellings).mockResolvedValue([]);
+});
 
 const TRANSCRIPT =
   "In the summer of 1985 we drove down to Florida. The next day we went to Disney.";
@@ -65,5 +71,27 @@ describe("TellingCapture", () => {
 
     expect(api.createVoiceTelling).toHaveBeenCalledWith(file);
     expect(push).toHaveBeenCalledWith("/tellings/t1");
+  });
+
+  it("points at a telling that is already waiting", async () => {
+    vi.mocked(api.getTellings).mockResolvedValue([
+      {
+        id: "t9",
+        status: "draft",
+        input_type: "text",
+        raw_transcript: "An account I started and never finished.",
+        segment_count: 3,
+        created_at: "2026-01-01T00:00:00",
+      },
+    ]);
+
+    render(<TellingCapture />);
+
+    expect(
+      await screen.findByText(/1 unfinished telling/i)
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("link", { name: /started and never finished/i })
+    ).toHaveAttribute("href", "/tellings/t9");
   });
 });

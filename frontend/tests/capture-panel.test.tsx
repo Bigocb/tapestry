@@ -13,7 +13,9 @@ vi.mock("@/lib/api", () => ({
     captureText: vi.fn(),
     captureForm: vi.fn(),
     captureVoice: vi.fn(),
+    getTellings: vi.fn().mockResolvedValue([]),
     createTelling: vi.fn(),
+    createVoiceTelling: vi.fn(),
   },
 }));
 

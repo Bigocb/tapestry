@@ -463,6 +463,81 @@ class TestReshapeSegments:
         assert response.status_code == 409
 
 
+class TestTellingList:
+    """An unfinished telling has to be findable, or the work is lost."""
+
+    async def _one_telling(self, client, token, monkeypatch) -> None:
+        async def fake_segmentation(transcript: str):
+            return SegmentationResult(
+                segments=[
+                    ProposedSegment(
+                        text=transcript,
+                        structured=_structured_memory("One"),
+                    )
+                ]
+            )
+
+        monkeypatch.setattr(
+            "app.routes.tellings.segment_transcript", fake_segmentation
+        )
+        client.post(
+            "/api/tellings",
+            json={"raw_transcript": TRANSCRIPT},
+            headers=_auth(token),
+        )
+
+    async def test_an_unfinished_telling_can_be_found_again(
+        self, client, setup_users, get_auth_token, monkeypatch
+    ):
+        await setup_users()
+        token = get_auth_token("alice", "password123")
+
+        await self._one_telling(client, token, monkeypatch)
+
+        response = client.get("/api/tellings", headers=_auth(token))
+
+        assert response.status_code == 200
+        items = response.json()
+        assert len(items) == 1
+        assert items[0]["status"] == "draft"
+        assert items[0]["raw_transcript"] == TRANSCRIPT
+
+    async def test_a_failed_telling_is_listed_rather_than_hidden(
+        self, client, setup_users, get_auth_token, monkeypatch
+    ):
+        await setup_users()
+        token = get_auth_token("alice", "password123")
+
+        async def failing_transcribe(audio: bytes) -> str:
+            raise RuntimeError("no model")
+
+        monkeypatch.setattr(
+            "app.routes.tellings._transcribe_audio", failing_transcribe
+        )
+        client.post(
+            "/api/tellings/voice",
+            files={"audio": ("story.webm", b"pretend-audio", "audio/webm")},
+            headers=_auth(token),
+        )
+
+        items = client.get("/api/tellings", headers=_auth(token)).json()
+
+        # It holds nothing but a failure, which is exactly why it must be
+        # visible rather than quietly forgotten.
+        assert [item["status"] for item in items] == ["failed"]
+
+    async def test_another_users_tellings_are_not_listed(
+        self, client, setup_users, get_auth_token, monkeypatch
+    ):
+        await setup_users()
+        alice = get_auth_token("alice", "password123")
+        bob = get_auth_token("bob", "password456")
+
+        await self._one_telling(client, alice, monkeypatch)
+
+        assert client.get("/api/tellings", headers=_auth(bob)).json() == []
+
+
 class TestVoiceTelling:
     """Told out loud. A long recording cannot block the request, so the work
     happens after the response and the client watches the telling."""

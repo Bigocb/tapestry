@@ -186,6 +186,16 @@ export interface TellingSegmentUpdate {
   date_label?: string | null;
 }
 
+export interface TellingSummary {
+  id: string;
+  status: string;
+  input_type: string;
+  frame_label?: string | null;
+  raw_transcript: string;
+  segment_count: number;
+  created_at: string;
+}
+
 export interface Telling {
   id: string;
   raw_transcript: string;
@@ -328,6 +338,8 @@ export const api = {
   undoEntityMerge: (mergeId: string) =>
     request("POST", `/entities/merge/${mergeId}/undo`, {}),
 
+  getTellings: () =>
+    request("GET", "/tellings") as Promise<TellingSummary[]>,
   createTelling: (raw_transcript: string) =>
     request("POST", "/tellings", { raw_transcript }) as Promise<Telling>,
   getTelling: (id: string) =>
