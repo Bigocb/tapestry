@@ -1452,21 +1452,53 @@ Related: `ENRICHMENT_IDEAS.md` already collects proposals in this area, and the
 Enrichment Agent (Issue 8) exists — but it enriches from the user's *other
 memories*, not from the outside world. This is the outside world.
 
-#### Open questions to settle first
+#### What was decided, and what the data says
 
-- lookup source: OpenStreetMap/Overpass, Wikipedia, a geocoder — and how to do
-  it without a paid dependency or an API key that expires
-- where it lives: on the entity, on the memory, or as a separate attachment so
-  it can never pollute the user's own words
-- how it is shown without the user mistaking a looked-up fact for their own
-  recollection — this matters more than it sounds, on a platform whose value is
-  that the memories are *yours*
-- what happens when the lookup is wrong, and whether the user can correct it
-- whether a closed business is *worth* flagging, or just noise
+- **Places only.** People are excluded permanently, not just for now: resolving
+  "Sarah" to a real person is unreliable *and* invasive, and being helpfully
+  wrong about a friend is worse than saying nothing.
+- **On demand** — a button on the entity. Cheaper, intentional, and the
+  provenance is self-evident because the user asked. Automatic lookup can come
+  later if it earns its place.
+- **Wikidata first**, because the motivating case is history: a theatre that
+  closed. Overpass/OSM is the obvious second source for ordinary places with no
+  Wikipedia entry.
+- **Facts are structurally separate**, with their source and fetch date. Never
+  folded into the user's own words or into `entities.attributes`.
+
+Checked against the real API before designing:
+
+| query | result |
+|---|---|
+| "Mission Valley Theater" | nothing |
+| "Mission Valley Cinemas" | **Q43096397** — *movie theater in Raleigh, North Carolina* |
+| "Raleigh" | three: the city, a family name, an Australian electorate |
+| "Bluebird Cafe" | three: a Nashville music club, a Californian restaurant, a print |
+
+Two things follow. **Disambiguation is real**, so a lookup must show *what it
+matched* — the label and description — not just a fact. And the description is
+itself often the useful answer, which is convenient: the thing that proves the
+match is right is the same thing that makes a wrong match visible.
 
 #### Acceptance criteria
 
-Not written yet. Brainstorm first.
+- [ ] A place entity can be looked up on demand
+- [ ] The match records its source, its source id, and when it was fetched
+- [ ] What was matched is shown — label and description — so a wrong match is
+      visible rather than silent
+- [ ] A lookup that finds nothing stores nothing and says so
+- [ ] Facts are stored separately from the user's own data and rendered
+      distinctly from it
+- [ ] A fact can be discarded
+- [ ] People are never looked up
+
+#### Explicitly deferred
+
+- Automatic lookup on entity creation.
+- Overpass/OSM, and merging sources.
+- Choosing between candidates: the first slice takes the best match and shows
+  it. Letting the user pick from the candidates is the natural follow-up, and
+  the search already returns them.
 
 ---
 
