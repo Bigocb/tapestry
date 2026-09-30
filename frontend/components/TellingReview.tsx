@@ -117,6 +117,9 @@ export function TellingReview({ tellingId }: { tellingId: string }) {
   if (!telling) return <p className="text-gray-500">Loading…</p>;
 
   const segments = telling.segments;
+  const nothingToSave =
+    segments.length > 0 &&
+    segments.every((segment) => segment.status === "rejected");
 
   return (
     <div className="max-w-3xl mx-auto space-y-8">
@@ -197,6 +200,11 @@ export function TellingReview({ tellingId }: { tellingId: string }) {
       </section>
 
       <section className="space-y-3">
+        {nothingToSave ? (
+          <p className="text-sm text-amber-700">
+            Nothing is left to save. Edit what you said above and re-split.
+          </p>
+        ) : null}
         {telling.status === "committed" ? (
           <button
             type="button"
@@ -210,7 +218,7 @@ export function TellingReview({ tellingId }: { tellingId: string }) {
           <button
             type="button"
             onClick={commit}
-            disabled={busy}
+            disabled={busy || nothingToSave}
             className="bg-indigo-600 text-white px-4 py-2 rounded hover:bg-indigo-700 disabled:opacity-50"
           >
             Save these memories

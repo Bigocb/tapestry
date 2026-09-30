@@ -247,6 +247,39 @@ describe("TellingReview dates", () => {
   });
 });
 
+describe("TellingReview with nothing left to save", () => {
+  it("points back at the transcript rather than leaving a dead end", async () => {
+    vi.mocked(api.getTelling).mockResolvedValue(
+      telling({
+        segments: [
+          {
+            id: "s1",
+            ordinal: 0,
+            text: "One.",
+            status: "rejected",
+            title: "One",
+          },
+          {
+            id: "s2",
+            ordinal: 1,
+            text: "Two.",
+            status: "rejected",
+            title: "Two",
+          },
+        ],
+      })
+    );
+
+    render(<TellingReview tellingId="t1" />);
+
+    // Rejecting everything is how you say "this split is wrong" — the way out
+    // is the transcript, not merging the ruins back together by hand.
+    expect(
+      await screen.findByText(/edit what you said above and re-split/i)
+    ).toBeInTheDocument();
+  });
+});
+
 describe("TellingReview re-splitting", () => {
   beforeEach(() => {
     vi.mocked(api.getTelling).mockResolvedValue(telling());
