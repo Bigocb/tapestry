@@ -10,6 +10,7 @@ miscount offsets, and the transcript on the telling row stays the source of
 truth, so exact partitioning is not needed.
 """
 
+import re
 from dataclasses import dataclass
 
 from app.agents.capture import (
@@ -35,12 +36,20 @@ Output a single JSON object with one field:
   - importance_level: integer 1-10
   - initial_tags: list of lowercase string tags, 1-5 items
   - event_date: ISO 8601 datetime string (e.g. "1985-07-01T00:00:00") or null
+  - date_precision: one of exact, month, year, decade, range, unknown
+  - date_label: string or null. The account's own wording for a fuzzy period, e.g. "High school", "early 2000s".
 
 Rules:
 - The account may be transcribed speech. It can have no paragraphs and unreliable punctuation. Split on changes of subject, time or place, never on sentence boundaries.
 - Relative time ("the next day", "two years later") belongs to the memory whose text contains it.
 - Never invent a memory that is not in the account. If the whole account is one memory, return one segment covering all of it.
 - Every word of the account should appear in exactly one segment's text.
+
+Dating rules — these matter more than they look:
+- event_date is when the memory happened. Never take it from a date that merely appears in the text: when the music was from, a birthday mentioned in passing, a year written on a sign. If the account does not say when the memory happened, set event_date to null and date_precision to "unknown".
+- Never invent a year. If the account gives a day and month but no year ("August 15th"), set event_date to null — do not supply a placeholder year such as 1900.
+- Always include event_date, date_precision and date_label, using null when you have nothing to say.
+- If the account states a period that frames several memories ("high school", "the summer of 1985"), give every memory that period covers the same wording as its date_label, so the memories from one account agree about when they took place.
 
 Allowed entity types: person, place, date, event, concept.
 
@@ -73,6 +82,60 @@ def _build_segmentation_prompt(transcript: str) -> str:
     )
 
 
+def _respect_explicit_null_dates(
+    structured: StructuredMemory, item: dict
+) -> None:
+    """Let the segmenter's explicit "no date" beat the deterministic scan.
+
+    ``_build_structured_memory`` re-derives a date from any year-like phrase, which
+    is right for a single capture but wrong for a segment: "the DJ played early
+    2000s throwbacks" says when the music was from, not when the memory happened.
+    The segmenter reads the whole account, so when it answers explicitly — even
+    with null — that answer is authoritative. An omitted key still falls back.
+    """
+    if item.get("event_date", "absent") is not None:
+        return
+
+    structured.event_date = None
+    structured.event_date_end = None
+    if item.get("date_precision") is None:
+        structured.date_precision = "unknown"
+    if item.get("date_label") is None:
+        structured.date_label = None
+
+
+def _year_is_supported(text: str, year: int) -> bool:
+    """Was this year plausibly read out of the text?
+
+    Accepts the four-digit year, or its last two digits, so "fall of 95" still
+    supports 1995.
+    """
+    if str(year) in text:
+        return True
+    return re.search(rf"\b{year % 100:02d}\b", text) is not None
+
+
+def _drop_unsupported_exact_date(structured: StructuredMemory, text: str) -> None:
+    """Reject an *exact* date whose year never appears in the segment.
+
+    "August 15th" states no year; a model that answers 1900-08-15 has invented
+    one, and an invented year is worse than no date because it silently files
+    the memory in the wrong century.
+
+    Only exact dates are policed. A decade or range is an honestly fuzzy answer
+    — "the 80s" legitimately resolves to a representative year that need not be
+    written out — so those are left alone.
+    """
+    if structured.event_date is None or structured.date_precision != "exact":
+        return
+    if _year_is_supported(text, structured.event_date.year):
+        return
+
+    structured.event_date = None
+    structured.event_date_end = None
+    structured.date_precision = "unknown"
+
+
 def _parse_segments(raw: object) -> list[ProposedSegment]:
     """Validate the model's segments, dropping anything unusable.
 
@@ -94,12 +157,10 @@ def _parse_segments(raw: object) -> list[ProposedSegment]:
         if not isinstance(text, str) or not text.strip():
             continue
         text = text.strip()
-        segments.append(
-            ProposedSegment(
-                text=text,
-                structured=_build_structured_memory(item, text),
-            )
-        )
+        structured = _build_structured_memory(item, text)
+        _respect_explicit_null_dates(structured, item)
+        _drop_unsupported_exact_date(structured, text)
+        segments.append(ProposedSegment(text=text, structured=structured))
     return segments
 
 

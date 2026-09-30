@@ -159,3 +159,91 @@ class TestSegmentTranscript:
 
         assert len(segments) == 1
         assert segments[0].text == TRANSCRIPT
+
+    @pytest.mark.asyncio
+    async def test_explicit_null_date_is_not_re_derived(self, monkeypatch):
+        """A year mentioned in passing must not date the memory.
+
+        The deterministic scan in _build_structured_memory re-derives a date
+        from any year-like phrase. "the DJ played early 2000s throwbacks" says
+        when the music was from, not when the memory happened, so the model's
+        explicit "no date" has to win over that scan.
+        """
+
+        async def fake_chat(prompt, system_prompt=None):
+            return {
+                "segments": [
+                    {
+                        "text": "the DJ played nothing but cheesy early 2000s throwbacks",
+                        "title": "The welcome dance",
+                        "event_date": None,
+                        "date_precision": None,
+                        "date_label": None,
+                    }
+                ]
+            }
+
+        monkeypatch.setattr(telling, "_call_ollama_chat", fake_chat)
+
+        segments = await segment_transcript(TRANSCRIPT)
+        structured = segments[0].structured
+
+        assert structured.event_date is None
+        assert structured.date_precision == "unknown"
+        assert structured.date_label is None
+
+    @pytest.mark.asyncio
+    async def test_drops_an_exact_date_whose_year_is_absent_from_the_text(
+        self, monkeypatch
+    ):
+        """"August 15th" has no year; answering 1900-08-15 invents one.
+
+        An invented year is worse than no date, because it silently files the
+        memory in the wrong century.
+        """
+
+        async def fake_chat(prompt, system_prompt=None):
+            return {
+                "segments": [
+                    {
+                        "text": "it was August 15th when it started",
+                        "title": "First day",
+                        "event_date": "1900-08-15T00:00:00",
+                        "date_precision": "exact",
+                        "date_label": None,
+                    }
+                ]
+            }
+
+        monkeypatch.setattr(telling, "_call_ollama_chat", fake_chat)
+
+        segments = await segment_transcript(TRANSCRIPT)
+        structured = segments[0].structured
+
+        assert structured.event_date is None
+        assert structured.date_precision == "unknown"
+
+    @pytest.mark.asyncio
+    async def test_keeps_an_exact_date_whose_year_is_in_the_text(self, monkeypatch):
+        """The guard must not throw away dates the account actually states."""
+
+        async def fake_chat(prompt, system_prompt=None):
+            return {
+                "segments": [
+                    {
+                        "text": "In July 1985 we drove down to Florida.",
+                        "title": "Florida",
+                        "event_date": "1985-07-01T00:00:00",
+                        "date_precision": "exact",
+                        "date_label": None,
+                    }
+                ]
+            }
+
+        monkeypatch.setattr(telling, "_call_ollama_chat", fake_chat)
+
+        segments = await segment_transcript(TRANSCRIPT)
+        structured = segments[0].structured
+
+        assert structured.event_date is not None
+        assert structured.event_date.year == 1985
