@@ -10,6 +10,12 @@ vi.mock("@/lib/api", () => ({
     getTelling: vi.fn(),
     updateTellingSegment: vi.fn(),
     commitTelling: vi.fn(),
+    mergeTellingSegments: vi.fn(),
+    splitTellingSegment: vi.fn(),
+    deleteTellingSegment: vi.fn(),
+    reorderTellingSegments: vi.fn(),
+    getTellingMemories: vi.fn(),
+    deleteTellingMemories: vi.fn(),
   },
 }));
 
@@ -194,6 +200,38 @@ describe("TellingReview dates", () => {
     expect(within(cards[2]).getByText("No date")).toBeInTheDocument();
   });
 
+  it("offers to undo a commit once the memories exist", async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.commitTelling).mockResolvedValue(
+      telling({
+        status: "committed",
+        segments: [
+          {
+            id: "s1",
+            ordinal: 0,
+            text: "In the summer of 1985 we drove down to Florida.",
+            status: "accepted",
+            title: "Trip to Florida",
+            memory_id: "m1",
+          },
+        ],
+      })
+    );
+    vi.mocked(api.deleteTellingMemories).mockResolvedValue(telling());
+
+    render(<TellingReview tellingId="t1" />);
+    await screen.findAllByTestId("telling-segment");
+
+    await user.click(
+      screen.getByRole("button", { name: /save these memories/i })
+    );
+    await user.click(
+      await screen.findByRole("button", { name: /delete these memories/i })
+    );
+
+    expect(api.deleteTellingMemories).toHaveBeenCalledWith("t1");
+  });
+
   it("shows the period the telling is about", async () => {
     vi.mocked(api.getTelling).mockResolvedValue(
       telling({ frame_label: "first month in high school" })
@@ -205,6 +243,86 @@ describe("TellingReview dates", () => {
     expect(
       await screen.findByText(/first month in high school/)
     ).toBeInTheDocument();
+  });
+});
+
+describe("TellingReview reshaping", () => {
+  beforeEach(() => {
+    vi.mocked(api.getTelling).mockResolvedValue(telling());
+    vi.mocked(api.deleteTellingSegment).mockResolvedValue(
+      telling({
+        segments: [
+          {
+            id: "s1",
+            ordinal: 0,
+            text: "In the summer of 1985 we drove down to Florida.",
+            status: "proposed",
+            title: "Trip to Florida",
+          },
+        ],
+      })
+    );
+  });
+
+  it("deletes a segment and shows the split that is left", async () => {
+    const user = userEvent.setup();
+    render(<TellingReview tellingId="t1" />);
+    const cards = await screen.findAllByTestId("telling-segment");
+
+    await user.click(within(cards[1]).getByRole("button", { name: "Delete" }));
+
+    expect(api.deleteTellingSegment).toHaveBeenCalledWith("t1", "s2");
+    expect(await screen.findAllByTestId("telling-segment")).toHaveLength(1);
+  });
+
+  it("merges a segment with the one after it", async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.mergeTellingSegments).mockResolvedValue(
+      telling({
+        segments: [
+          {
+            id: "s1",
+            ordinal: 0,
+            text: "In the summer of 1985 we drove down to Florida. The next day we went to Disney.",
+            status: "proposed",
+            title: "Trip to Florida",
+          },
+        ],
+      })
+    );
+
+    render(<TellingReview tellingId="t1" />);
+    const cards = await screen.findAllByTestId("telling-segment");
+
+    await user.click(
+      within(cards[0]).getByRole("button", { name: /merge with next/i })
+    );
+
+    expect(api.mergeTellingSegments).toHaveBeenCalledWith("t1", ["s1", "s2"]);
+    expect(await screen.findAllByTestId("telling-segment")).toHaveLength(1);
+  });
+
+  it("moves a segment down the order", async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.reorderTellingSegments).mockResolvedValue(telling());
+
+    render(<TellingReview tellingId="t1" />);
+    const cards = await screen.findAllByTestId("telling-segment");
+
+    await user.click(
+      within(cards[0]).getByRole("button", { name: /move down/i })
+    );
+
+    expect(api.reorderTellingSegments).toHaveBeenCalledWith("t1", ["s2", "s1"]);
+  });
+
+  it("does not offer to merge the last segment forward", async () => {
+    render(<TellingReview tellingId="t1" />);
+    const cards = await screen.findAllByTestId("telling-segment");
+
+    expect(
+      within(cards[1]).queryByRole("button", { name: /merge with next/i })
+    ).not.toBeInTheDocument();
   });
 });
 

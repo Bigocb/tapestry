@@ -344,4 +344,29 @@ export const api = {
     ) as Promise<TellingSegment>,
   commitTelling: (id: string) =>
     request("POST", `/tellings/${id}/commit`, {}) as Promise<Telling>,
+
+  // Reshaping a draft. Each returns the whole telling back, so the screen is
+  // rebuilt from one source of truth rather than patched locally.
+  mergeTellingSegments: (tellingId: string, segmentIds: string[]) =>
+    request("POST", `/tellings/${tellingId}/segments/merge`, {
+      segment_ids: segmentIds,
+    }) as Promise<Telling>,
+  splitTellingSegment: (tellingId: string, segmentId: string, at: number) =>
+    request("POST", `/tellings/${tellingId}/segments/${segmentId}/split`, {
+      at,
+    }) as Promise<Telling>,
+  deleteTellingSegment: (tellingId: string, segmentId: string) =>
+    request(
+      "DELETE",
+      `/tellings/${tellingId}/segments/${segmentId}`
+    ) as Promise<Telling>,
+  reorderTellingSegments: (tellingId: string, segmentIds: string[]) =>
+    request("POST", `/tellings/${tellingId}/segments/reorder`, {
+      segment_ids: segmentIds,
+    }) as Promise<Telling>,
+
+  getTellingMemories: (tellingId: string) =>
+    request("GET", `/tellings/${tellingId}/memories`) as Promise<unknown[]>,
+  deleteTellingMemories: (tellingId: string) =>
+    request("DELETE", `/tellings/${tellingId}/memories`) as Promise<Telling>,
 };
