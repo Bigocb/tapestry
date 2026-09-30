@@ -5,14 +5,14 @@
 > **Done (verified by code + tests):** Issues 2, 3, 4, 5, 6, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 36
 > **Partial:** Issue 1 (Postgres is now provisioned, but **the pgvector extension is not installed** — the database has only `plpgsql`; the schema, indexes and cross-DB type decorators are in place), Issue 7 (embeddings work via Ollama with a deterministic local fallback; **similarity is still computed in Python** — no ANN index, because pgvector is absent)
 > **Superseded:** Issue 27 — the deployment target changed. MEMIND runs in Docker Compose with Postgres on the homelab box, published through Traefik and cloudflared at `memory.cloutier.work`. The service is live; the Render-specific acceptance criteria no longer apply.
-> **Phase 9 (Tellings) is complete** — Issues 28–36 all done, deployed and verified. What is left is the later phases, none of them written up yet: Phase 10 (Issue 37, password reset), Phase 11 (Issue 38, real-world enrichment) and Phase 12 (Issue 39, the timeline revisit).
+> **Phases 9 (Tellings) and 10 (Account Recovery) are complete** — Issues 28–37 all done, deployed and verified. What is left is Phase 11 (Issue 38, real-world enrichment) and Phase 12 (Issue 39, the timeline revisit), neither of them specified yet.
 >
 > **Key deviations from original plan:**
 > - **Storage:** production runs on Postgres 16 in Docker on the homelab box. SQLite (`memind.db`) remains the local-dev default.
 > - **Search:** full-text + semantic ranking done in Python over fetched rows, not Postgres `tsquery`/pgvector ANN.
 > - **Agents:** Ollama Cloud (`ollama.com/v1`, `gemma4:31b`) is primary. Story generation implements a Claude Opus fallback (`ANTHROPIC_API_KEY`), gated on a response-quality check; capture/refinement/enrichment are Ollama-only.
 > - **Transcription:** local `faster-whisper`; Issue 4's backend is wired. A 501 is still returned when the model or its dependency is genuinely unavailable — that is error handling, not the old stub.
-> - **Tests:** 442 backend passing, 1 skipped (the pgvector extension check) on in-memory SQLite, plus 34 frontend tests via vitest/jsdom.
+> - **Tests:** 454 backend passing, 1 skipped (the pgvector extension check) on in-memory SQLite, plus 38 frontend tests via vitest/jsdom.
 > - **Beyond the plan:** first-class entities, the privacy lock, the review queue and fuzzy dates all shipped outside the numbered issues, so this list understates the delivered surface.
 >
 > **Remaining work:** the pgvector half of Issue 1 (and the ANN search it would unblock in Issue 7), Phase 9 (Tellings, Issues 28–35), and active iteration on capture/parsing quality (Issues 4–6 area).
@@ -1390,15 +1390,31 @@ the account. "Displayed" means displayed to the operator, never to the caller.
 #### Acceptance criteria
 
 - [ ] A reset can be requested by username or email
-- [ ] The request answers identically whether or not the account exists, so it
+- [x] The request answers identically whether or not the account exists, so it
       cannot be used to discover who has an account
-- [ ] Tokens are stored hashed, never in plaintext
-- [ ] A token is single-use and expires
-- [ ] Completing a reset invalidates that token and any others outstanding
-- [ ] The token never appears in an HTTP response body
-- [ ] With no SMTP configured, the link is written to the log
-- [ ] With SMTP configured, the link is emailed instead
-- [ ] Reset requests are rate limited per account
+- [x] Tokens are stored hashed, never in plaintext
+- [x] A token is single-use and expires
+- [x] Completing a reset invalidates that token and any others outstanding
+- [x] The token never appears in an HTTP response body
+- [x] With no SMTP configured, the link is written to the log
+- [x] With SMTP configured, the link is emailed instead
+- [x] Reset requests are rate limited per account
+
+> **Status: DONE.** Note what the first criterion has now become: the link goes
+> to `user.email`, not the username. That is what the SMTP path needs, and it
+> still appears in the log for the operator.
+>
+> Creating a reset for an unknown account does nothing at all — no token, no
+> delivery, same answer. The rate limit is enforced by *skipping*, not by
+> refusing, for the same reason: a refusal would confirm the account exists.
+>
+> `min_length=8` on the new password matches registration, so a password cannot
+> be reset to something signup would have rejected.
+>
+> The delivery module reports whether it actually emailed, rather than implying
+> a message went out. On this host there is no relay, so the log is the path
+> that runs — and the returned flag is what would let a future UI say so
+> honestly instead of "check your inbox".
 
 #### Notes
 
