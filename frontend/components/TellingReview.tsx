@@ -18,13 +18,17 @@ export function TellingReview({ tellingId }: { tellingId: string }) {
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [transcript, setTranscript] = useState<string | null>(null);
+  const [resplit, setResplit] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     api
       .getTelling(tellingId)
       .then((loaded) => {
-        if (!cancelled) setTelling(loaded);
+        if (cancelled) return;
+        setTelling(loaded);
+        setTranscript(loaded.raw_transcript);
       })
       .catch(() => {
         if (!cancelled) setError("Could not load this telling.");
@@ -33,6 +37,33 @@ export function TellingReview({ tellingId }: { tellingId: string }) {
       cancelled = true;
     };
   }, [tellingId]);
+
+  async function resplitTranscript() {
+    if (!telling) return;
+
+    // The whole split is thrown away, so say so before doing it.
+    const proceed = window.confirm(
+      "Re-splitting replaces the current proposed memories. Continue?"
+    );
+    if (!proceed) return;
+
+    const value = transcript ?? telling.raw_transcript;
+    const before = new Set(telling.segments.map((segment) => segment.text));
+
+    setBusy(true);
+    try {
+      const updated = await api.updateTellingTranscript(telling.id, value);
+      const after = new Set(updated.segments.map((segment) => segment.text));
+      const added = [...after].filter((text) => !before.has(text)).length;
+      const gone = [...before].filter((text) => !after.has(text)).length;
+
+      setTelling(updated);
+      setTranscript(updated.raw_transcript);
+      setResplit(`${added} new, ${gone} gone`);
+    } finally {
+      setBusy(false);
+    }
+  }
 
   // Every structural edit returns the whole telling, so the screen is rebuilt
   // from one source of truth rather than patched piecemeal.
@@ -91,16 +122,29 @@ export function TellingReview({ tellingId }: { tellingId: string }) {
     <div className="max-w-3xl mx-auto space-y-8">
       <section>
         <h1 className="text-2xl font-bold mb-4">Tell a story</h1>
-        <div className="border rounded p-4 bg-gray-50">
-          <p className="text-xs uppercase tracking-wide text-gray-500 mb-2">
-            What you said
-          </p>
-          <p
-            data-testid="telling-transcript"
-            className="whitespace-pre-wrap text-gray-700"
+        <div className="border rounded p-4 bg-gray-50 space-y-3">
+          <label className="block">
+            <span className="block text-xs uppercase tracking-wide text-gray-500 mb-2">
+              What you said
+            </span>
+            <textarea
+              data-testid="telling-transcript"
+              className="w-full border rounded p-3 h-40 text-gray-700"
+              value={transcript ?? ""}
+              onChange={(event) => setTranscript(event.target.value)}
+            />
+          </label>
+          <button
+            type="button"
+            onClick={resplitTranscript}
+            disabled={busy}
+            className="border px-4 py-2 rounded hover:bg-white disabled:opacity-50"
           >
-            {telling.raw_transcript}
-          </p>
+            Re-split
+          </button>
+          {resplit ? (
+            <p className="text-sm text-gray-600">Re-split: {resplit}.</p>
+          ) : null}
         </div>
       </section>
 

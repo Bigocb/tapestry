@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { TellingReview } from "@/components/TellingReview";
 import { api, type Telling } from "@/lib/api";
@@ -9,6 +9,7 @@ vi.mock("@/lib/api", () => ({
   api: {
     getTelling: vi.fn(),
     updateTellingSegment: vi.fn(),
+    updateTellingTranscript: vi.fn(),
     commitTelling: vi.fn(),
     mergeTellingSegments: vi.fn(),
     splitTellingSegment: vi.fn(),
@@ -57,8 +58,8 @@ describe("TellingReview", () => {
   it("renders the transcript and one card per proposed segment", async () => {
     render(<TellingReview tellingId="t1" />);
 
-    expect(await screen.findByTestId("telling-transcript")).toHaveTextContent(
-      /we drove down to Florida/
+    expect(await screen.findByTestId("telling-transcript")).toHaveValue(
+      TRANSCRIPT
     );
     expect(screen.getAllByTestId("telling-segment")).toHaveLength(2);
     expect(screen.getByText("Trip to Florida")).toBeInTheDocument();
@@ -243,6 +244,65 @@ describe("TellingReview dates", () => {
     expect(
       await screen.findByText(/first month in high school/)
     ).toBeInTheDocument();
+  });
+});
+
+describe("TellingReview re-splitting", () => {
+  beforeEach(() => {
+    vi.mocked(api.getTelling).mockResolvedValue(telling());
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("warns before discarding the current split", async () => {
+    const user = userEvent.setup();
+    const confirmSpy = vi
+      .spyOn(window, "confirm")
+      .mockReturnValue(false);
+
+    render(<TellingReview tellingId="t1" />);
+    await screen.findAllByTestId("telling-segment");
+
+    await user.click(screen.getByRole("button", { name: /re-split/i }));
+
+    expect(confirmSpy).toHaveBeenCalled();
+    expect(api.updateTellingTranscript).not.toHaveBeenCalled();
+  });
+
+  it("re-splits an edited transcript and reports what changed", async () => {
+    const user = userEvent.setup();
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    vi.mocked(api.updateTellingTranscript).mockResolvedValue(
+      telling({
+        raw_transcript: "A completely different account.",
+        segments: [
+          {
+            id: "s9",
+            ordinal: 0,
+            text: "A completely different account.",
+            status: "proposed",
+            title: "Fresh",
+          },
+        ],
+      })
+    );
+
+    render(<TellingReview tellingId="t1" />);
+    await screen.findAllByTestId("telling-segment");
+
+    fireEvent.change(screen.getByTestId("telling-transcript"), {
+      target: { value: "A completely different account." },
+    });
+    await user.click(screen.getByRole("button", { name: /re-split/i }));
+
+    expect(api.updateTellingTranscript).toHaveBeenCalledWith(
+      "t1",
+      "A completely different account."
+    );
+    // The two old memories are gone, one new one arrived.
+    expect(await screen.findByText(/1 new, 2 gone/i)).toBeInTheDocument();
   });
 });
 

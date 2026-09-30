@@ -446,6 +446,98 @@ class TestReshapeSegments:
         assert response.status_code == 409
 
 
+class TestResplitTelling:
+    """The transcript is the source. A bad split means editing it, not the
+    segments — though the segments can be reshaped first."""
+
+    async def test_editing_the_transcript_replaces_the_segments(
+        self, client, setup_users, get_auth_token, monkeypatch
+    ):
+        await setup_users()
+        token = get_auth_token("alice", "password123")
+
+        seen = []
+
+        async def fake_segmentation(transcript: str):
+            seen.append(transcript)
+            return SegmentationResult(
+                segments=[
+                    ProposedSegment(
+                        text=transcript[:10],
+                        structured=_structured_memory("Head"),
+                    ),
+                    ProposedSegment(
+                        text=transcript[10:],
+                        structured=_structured_memory("Tail"),
+                    ),
+                ]
+            )
+
+        monkeypatch.setattr(
+            "app.routes.tellings.segment_transcript", fake_segmentation
+        )
+
+        draft = client.post(
+            "/api/tellings",
+            json={"raw_transcript": TRANSCRIPT},
+            headers=_auth(token),
+        ).json()
+        assert len(draft["segments"]) == 2
+
+        edited = "A completely different account of that summer."
+        response = client.patch(
+            f"/api/tellings/{draft['id']}",
+            json={"raw_transcript": edited},
+            headers=_auth(token),
+        )
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["raw_transcript"] == edited
+        assert [segment["text"] for segment in body["segments"]] == [
+            edited[:10],
+            edited[10:],
+        ]
+        # The old segments are replaced, not appended to.
+        assert [segment["ordinal"] for segment in body["segments"]] == [0, 1]
+        assert seen == [TRANSCRIPT, edited]
+
+    async def test_resplitting_a_committed_telling_is_refused(
+        self, client, setup_users, get_auth_token, monkeypatch
+    ):
+        await setup_users()
+        token = get_auth_token("alice", "password123")
+
+        async def fake_segmentation(transcript: str):
+            return SegmentationResult(
+                segments=[
+                    ProposedSegment(
+                        text=transcript,
+                        structured=_structured_memory("One"),
+                    )
+                ]
+            )
+
+        monkeypatch.setattr(
+            "app.routes.tellings.segment_transcript", fake_segmentation
+        )
+        draft = client.post(
+            "/api/tellings",
+            json={"raw_transcript": TRANSCRIPT},
+            headers=_auth(token),
+        ).json()
+        client.post(f"/api/tellings/{draft['id']}/commit", headers=_auth(token))
+
+        response = client.patch(
+            f"/api/tellings/{draft['id']}",
+            json={"raw_transcript": "Something else entirely."},
+            headers=_auth(token),
+        )
+
+        # Replacing the segments would orphan the memories they produced.
+        assert response.status_code == 409
+
+
 class TestTellingProvenance:
     """What a telling produced, and how to take it back."""
 

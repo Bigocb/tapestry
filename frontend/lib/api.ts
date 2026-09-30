@@ -332,6 +332,10 @@ export const api = {
     request("POST", "/tellings", { raw_transcript }) as Promise<Telling>,
   getTelling: (id: string) =>
     request("GET", `/tellings/${id}`) as Promise<Telling>,
+  updateTellingTranscript: (id: string, rawTranscript: string) =>
+    request("PATCH", `/tellings/${id}`, {
+      raw_transcript: rawTranscript,
+    }) as Promise<Telling>,
   updateTellingSegment: (
     tellingId: string,
     segmentId: string,

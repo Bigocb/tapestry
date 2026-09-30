@@ -13,7 +13,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.agents.telling import segment_transcript
+from app.agents.telling import SegmentationResult, segment_transcript
 from app.db import get_db, Memory, Telling, TellingSegment, User
 from app.db.entities import sync_memory_entities
 from app.db.memory_writes import apply_memory_date_fields, apply_review_flags
@@ -29,6 +29,7 @@ from app.models.schemas import (
     TellingSegmentResponse,
     TellingSegmentSplit,
     TellingSegmentUpdate,
+    TellingTranscriptUpdate,
 )
 
 router = APIRouter()
@@ -123,31 +124,44 @@ async def capture_telling(
     # Split once, on the way in. Commit must not re-run this: the reviewed
     # content on each segment is authoritative.
     proposed = await segment_transcript(payload.raw_transcript)
-
-    # The period the account is about belongs to the telling rather than to any
-    # one memory, so it is stored once here and inherited by the undated.
-    telling.frame_label = proposed.frame_label
-    telling.frame_date = proposed.frame_date
-
-    for ordinal, segment in enumerate(proposed.segments):
-        structured = segment.structured
-        db.add(
-            TellingSegment(
-                telling_id=telling.id,
-                user_id=current_user.id,
-                ordinal=ordinal,
-                text=segment.text,
-                structured_content=structured.model_dump(mode="json"),
-                event_date=structured.event_date,
-                date_precision=structured.date_precision,
-                event_date_end=structured.event_date_end,
-                date_label=structured.date_label,
-                status=PROPOSED,
-            )
-        )
+    _store_segments(db, telling, current_user.id, proposed)
     await db.commit()
 
     return _telling_response(await _load_telling(db, current_user.id, telling.id))
+
+
+@router.patch(
+    "/tellings/{telling_id}",
+    response_model=TellingResponse,
+    summary="Edit a telling's transcript",
+    description="Replace the transcript and re-split it into proposed memories.",
+)
+async def update_telling_transcript(
+    telling_id: UUID,
+    payload: TellingTranscriptUpdate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> TellingResponse:
+    """Replace the transcript and start the split over.
+
+    Refused once the telling is committed: replacing the segments would orphan
+    the memories they produced. Undo the commit first, then re-split.
+    """
+    telling = await _load_draft_telling(db, current_user.id, telling_id)
+
+    telling.raw_transcript = payload.raw_transcript
+
+    # The old split described the old wording, so all of it goes rather than
+    # being patched into something that no longer matches the transcript.
+    for segment in list(telling.segments):
+        await db.delete(segment)
+    await db.flush()
+
+    proposed = await segment_transcript(payload.raw_transcript)
+    _store_segments(db, telling, current_user.id, proposed)
+    await db.commit()
+
+    return _telling_response(await _load_telling(db, current_user.id, telling_id))
 
 
 @router.get(
@@ -164,6 +178,33 @@ async def get_telling(
     """Fetch one telling and its proposed split."""
     telling = await _load_telling(db, current_user.id, telling_id)
     return _telling_response(telling)
+
+
+def _store_segments(
+    db: AsyncSession, telling: Telling, user_id, proposed: SegmentationResult
+) -> None:
+    """Write a segmentation result onto a telling as its draft segments."""
+    # The period the account is about belongs to the telling rather than to any
+    # one memory, so it is stored once here and inherited by the undated.
+    telling.frame_label = proposed.frame_label
+    telling.frame_date = proposed.frame_date
+
+    for ordinal, segment in enumerate(proposed.segments):
+        structured = segment.structured
+        db.add(
+            TellingSegment(
+                telling_id=telling.id,
+                user_id=user_id,
+                ordinal=ordinal,
+                text=segment.text,
+                structured_content=structured.model_dump(mode="json"),
+                event_date=structured.event_date,
+                date_precision=structured.date_precision,
+                event_date_end=structured.event_date_end,
+                date_label=structured.date_label,
+                status=PROPOSED,
+            )
+        )
 
 
 async def _load_draft_telling(db: AsyncSession, user_id, telling_id) -> Telling:

@@ -622,6 +622,14 @@ class TellingSegmentUpdate(BaseModel):
     date_label: Optional[str] = Field(None, max_length=120)
 
 
+class TellingTranscriptUpdate(BaseModel):
+    """A corrected transcript. Re-splitting replaces the whole proposed split."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    raw_transcript: str = Field(..., min_length=1, max_length=20000)
+
+
 class TellingSegmentMerge(BaseModel):
     """Segments to join into one. They must be adjacent."""
 
