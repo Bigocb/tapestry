@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
@@ -14,6 +14,7 @@ vi.mock("next/navigation", () => ({
 vi.mock("@/lib/api", () => ({
   api: {
     createTelling: vi.fn(),
+    createVoiceTelling: vi.fn(),
   },
 }));
 
@@ -43,6 +44,26 @@ describe("TellingCapture", () => {
     await user.click(screen.getByRole("button", { name: /tell it/i }));
 
     expect(api.createTelling).toHaveBeenCalledWith(TRANSCRIPT);
+    expect(push).toHaveBeenCalledWith("/tellings/t1");
+  });
+
+  it("uploads a recording and opens its review screen", async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.createVoiceTelling).mockResolvedValue(CREATED);
+
+    render(<TellingCapture />);
+
+    const file = new File(["pretend audio"], "story.webm", {
+      type: "audio/webm",
+    });
+    fireEvent.change(screen.getByLabelText(/upload a recording/i), {
+      target: { files: [file] },
+    });
+    await user.click(
+      screen.getByRole("button", { name: /upload recording/i })
+    );
+
+    expect(api.createVoiceTelling).toHaveBeenCalledWith(file);
     expect(push).toHaveBeenCalledWith("/tellings/t1");
   });
 });

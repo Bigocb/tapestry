@@ -8,7 +8,15 @@ can never surface in the timeline, search, review queue or entity graph.
 
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    File,
+    HTTPException,
+    UploadFile,
+    status,
+)
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -19,7 +27,7 @@ from app.db.entities import sync_memory_entities
 from app.db.memory_writes import apply_memory_date_fields, apply_review_flags
 from app.dependencies import get_current_user
 from app.privacy import get_unlocked_memory_ids
-from app.routes.memories import _memory_response
+from app.routes.memories import _memory_response, _transcribe_audio
 from app.models.schemas import (
     MemoryResponse,
     TellingCreate,
@@ -45,6 +53,55 @@ DATE_PRECISIONS = {"exact", "month", "year", "decade", "range", "unknown"}
 
 DRAFT = "draft"
 COMMITTED = "committed"
+TRANSCRIBING = "transcribing"
+SEGMENTING = "segmenting"
+FAILED = "failed"
+
+
+def _background_session_factory():
+    """Session factory for work that runs after the response has gone out.
+
+    Read through the scheduler module so tests can point it at their database,
+    exactly as the memory pipeline does.
+    """
+    from app.jobs import scheduler as scheduler_module
+
+    return scheduler_module.BackgroundSessionLocal
+
+
+async def _process_voice_telling(
+    telling_id: str, user_id: str, audio_bytes: bytes
+) -> None:
+    """Transcribe a recording, split it, and record the outcome on the telling.
+
+    Runs after the response, because transcribing a long recording takes
+    minutes and the request cannot wait for it.
+    """
+    session_factory = _background_session_factory()
+
+    async with session_factory() as db:
+        telling = (
+            await db.execute(select(Telling).where(Telling.id == telling_id))
+        ).scalar_one_or_none()
+        if telling is None:
+            return
+
+        try:
+            telling.raw_transcript = await _transcribe_audio(audio_bytes)
+            telling.status = SEGMENTING
+            await db.flush()
+
+            proposed = await segment_transcript(telling.raw_transcript)
+            _store_segments(db, telling, user_id, proposed)
+            telling.status = DRAFT
+            telling.error = None
+        except Exception as exc:  # noqa: BLE001 - the reason is the point
+            # The recording is gone either way, but the telling stays and says
+            # what went wrong. Losing the transcript silently would be worse.
+            telling.status = FAILED
+            telling.error = (str(exc) or exc.__class__.__name__)[:500]
+
+        await db.commit()
 
 
 def _segment_response(segment: TellingSegment) -> TellingSegmentResponse:
@@ -162,6 +219,41 @@ async def update_telling_transcript(
     await db.commit()
 
     return _telling_response(await _load_telling(db, current_user.id, telling_id))
+
+
+@router.post(
+    "/tellings/voice",
+    response_model=TellingResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Tell a story out loud",
+    description="Upload a recording; it is transcribed and split in the background.",
+)
+async def capture_voice_telling(
+    background_tasks: BackgroundTasks,
+    audio: UploadFile = File(...),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> TellingResponse:
+    """Accept the recording and hand the slow part to a background task."""
+    audio_bytes = await audio.read()
+
+    telling = Telling(
+        user_id=current_user.id,
+        raw_transcript="",
+        input_type="voice",
+        status=TRANSCRIBING,
+    )
+    db.add(telling)
+    await db.commit()
+
+    background_tasks.add_task(
+        _process_voice_telling,
+        str(telling.id),
+        str(current_user.id),
+        audio_bytes,
+    )
+
+    return _telling_response(await _load_telling(db, current_user.id, telling.id))
 
 
 @router.get(

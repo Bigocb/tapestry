@@ -13,6 +13,11 @@ import { formatMemoryDate } from "@/lib/dates";
 // A fuzzy period is a real answer, so precision is the user's to choose.
 const PRECISIONS = ["exact", "month", "year", "decade"];
 
+// A voice telling arrives empty and fills in later, so it has to be watched
+// rather than fetched once.
+const IN_PROGRESS = ["transcribing", "segmenting"];
+const POLL_MS = 3000;
+
 export function TellingReview({ tellingId }: { tellingId: string }) {
   const [telling, setTelling] = useState<Telling | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -23,18 +28,31 @@ export function TellingReview({ tellingId }: { tellingId: string }) {
 
   useEffect(() => {
     let cancelled = false;
-    api
-      .getTelling(tellingId)
-      .then((loaded) => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+
+    const load = async () => {
+      try {
+        const loaded = await api.getTelling(tellingId);
         if (cancelled) return;
+
         setTelling(loaded);
         setTranscript(loaded.raw_transcript);
-      })
-      .catch(() => {
+
+        // Keep asking until there is something to review. A long recording
+        // takes minutes, so the alternative would be a spinner that lies.
+        if (IN_PROGRESS.includes(loaded.status)) {
+          timer = setTimeout(load, POLL_MS);
+        }
+      } catch {
         if (!cancelled) setError("Could not load this telling.");
-      });
+      }
+    };
+
+    load();
+
     return () => {
       cancelled = true;
+      if (timer) clearTimeout(timer);
     };
   }, [tellingId]);
 
@@ -115,6 +133,35 @@ export function TellingReview({ tellingId }: { tellingId: string }) {
 
   if (error) return <p className="text-red-600">{error}</p>;
   if (!telling) return <p className="text-gray-500">Loading…</p>;
+
+  if (IN_PROGRESS.includes(telling.status)) {
+    return (
+      <div className="max-w-3xl mx-auto">
+        <h1 className="text-2xl font-bold mb-4">Tell a story</h1>
+        <p className="text-gray-600">
+          {telling.status === "transcribing"
+            ? "Transcribing your recording…"
+            : "Splitting it into memories…"}
+        </p>
+      </div>
+    );
+  }
+
+  if (telling.status === "failed") {
+    return (
+      <div className="max-w-3xl mx-auto space-y-4">
+        <h1 className="text-2xl font-bold">Tell a story</h1>
+        <div className="border rounded p-4 bg-red-50">
+          <h2 className="font-semibold text-red-800">
+            That recording could not be processed
+          </h2>
+          <p className="text-sm text-gray-700">
+            {telling.error || "No reason was given."}
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   const segments = telling.segments;
   const nothingToSave =

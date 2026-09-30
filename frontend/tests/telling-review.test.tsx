@@ -280,6 +280,37 @@ describe("TellingReview with nothing left to save", () => {
   });
 });
 
+describe("TellingReview while a recording is processed", () => {
+  it("says what it is doing rather than showing an empty split", async () => {
+    vi.mocked(api.getTelling).mockResolvedValue(
+      telling({ status: "transcribing", raw_transcript: "", segments: [] })
+    );
+
+    render(<TellingReview tellingId="t1" />);
+
+    expect(
+      await screen.findByText(/transcribing your recording/i)
+    ).toBeInTheDocument();
+  });
+
+  it("says what went wrong rather than showing nothing at all", async () => {
+    vi.mocked(api.getTelling).mockResolvedValue(
+      telling({
+        status: "failed",
+        error: "the model is missing",
+        raw_transcript: "",
+        segments: [],
+      })
+    );
+
+    render(<TellingReview tellingId="t1" />);
+
+    expect(
+      await screen.findByText(/the model is missing/i)
+    ).toBeInTheDocument();
+  });
+});
+
 describe("TellingReview re-splitting", () => {
   beforeEach(() => {
     vi.mocked(api.getTelling).mockResolvedValue(telling());

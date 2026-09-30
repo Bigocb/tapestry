@@ -50,15 +50,32 @@ async def test_db():
 
 @pytest.fixture
 def client(test_db):
-    """FastAPI test client with overridden database dependency."""
+    """FastAPI test client with overridden database dependency.
+
+    Also points the background session factory at the test database: a voice
+    telling does its transcribing after the response, in its own session.
+    """
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+
+    from app.jobs import scheduler
 
     async def override_get_db():
         yield test_db
+
+    test_factory = async_sessionmaker(
+        bind=test_db.bind,
+        class_=type(test_db),
+        expire_on_commit=False,
+        autoflush=False,
+    )
+    original_factory = scheduler.BackgroundSessionLocal
+    scheduler.BackgroundSessionLocal = test_factory
 
     app.dependency_overrides[get_db] = override_get_db
 
     yield TestClient(app)
 
+    scheduler.BackgroundSessionLocal = original_factory
     app.dependency_overrides.pop(get_db, None)
 
 
@@ -444,6 +461,86 @@ class TestReshapeSegments:
         # Its segments are memories now; moving their boundaries would orphan
         # them.
         assert response.status_code == 409
+
+
+class TestVoiceTelling:
+    """Told out loud. A long recording cannot block the request, so the work
+    happens after the response and the client watches the telling."""
+
+    async def test_audio_is_transcribed_and_split_after_the_response(
+        self, client, setup_users, get_auth_token, monkeypatch
+    ):
+        await setup_users()
+        token = get_auth_token("alice", "password123")
+
+        async def fake_transcribe(audio: bytes) -> str:
+            assert audio == b"pretend-audio"
+            return "First memory. Second memory."
+
+        async def fake_segmentation(transcript: str):
+            return SegmentationResult(
+                segments=[
+                    ProposedSegment(
+                        text=transcript,
+                        structured=_structured_memory("The whole account"),
+                    )
+                ]
+            )
+
+        monkeypatch.setattr(
+            "app.routes.tellings._transcribe_audio", fake_transcribe
+        )
+        monkeypatch.setattr(
+            "app.routes.tellings.segment_transcript", fake_segmentation
+        )
+
+        response = client.post(
+            "/api/tellings/voice",
+            files={"audio": ("story.webm", b"pretend-audio", "audio/webm")},
+            headers=_auth(token),
+        )
+
+        assert response.status_code == 201
+        body = response.json()
+        # The response leaves before the work starts...
+        assert body["status"] == "transcribing"
+        assert body["raw_transcript"] == ""
+
+        # ...and the work has landed by the time the client looks again.
+        fetched = client.get(
+            f"/api/tellings/{body['id']}", headers=_auth(token)
+        ).json()
+        assert fetched["status"] == "draft"
+        assert fetched["raw_transcript"] == "First memory. Second memory."
+        assert len(fetched["segments"]) == 1
+
+    async def test_a_failed_transcription_keeps_the_telling(
+        self, client, setup_users, get_auth_token, monkeypatch
+    ):
+        await setup_users()
+        token = get_auth_token("alice", "password123")
+
+        async def failing_transcribe(audio: bytes) -> str:
+            raise RuntimeError("no model")
+
+        monkeypatch.setattr(
+            "app.routes.tellings._transcribe_audio", failing_transcribe
+        )
+
+        response = client.post(
+            "/api/tellings/voice",
+            files={"audio": ("story.webm", b"pretend-audio", "audio/webm")},
+            headers=_auth(token),
+        )
+        assert response.status_code == 201
+
+        # The recording is gone, but the telling is not: the failure is
+        # recorded where the client can see it rather than vanishing.
+        fetched = client.get(
+            f"/api/tellings/{response.json()['id']}", headers=_auth(token)
+        ).json()
+        assert fetched["status"] == "failed"
+        assert fetched["error"]
 
 
 class TestResplitTelling:

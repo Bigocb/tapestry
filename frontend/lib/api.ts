@@ -332,6 +332,21 @@ export const api = {
     request("POST", "/tellings", { raw_transcript }) as Promise<Telling>,
   getTelling: (id: string) =>
     request("GET", `/tellings/${id}`) as Promise<Telling>,
+  createVoiceTelling: (file: File) => {
+    const form = new FormData();
+    form.append("audio", file);
+    return fetch(`${API_BASE}/tellings/voice`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${getToken() || ""}` },
+      body: form,
+    }).then(async (response) => {
+      const data = await response.json().catch(() => null);
+      if (!response.ok) {
+        throw new Error(data?.detail || `Upload failed (${response.status})`);
+      }
+      return data as Telling;
+    });
+  },
   updateTellingTranscript: (id: string, rawTranscript: string) =>
     request("PATCH", `/tellings/${id}`, {
       raw_transcript: rawTranscript,
