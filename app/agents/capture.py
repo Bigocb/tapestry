@@ -479,18 +479,37 @@ def resolve_date(raw_input: str) -> ResolvedDate:
     return ResolvedDate()
 
 
-def _extract_event_date(raw_input: str) -> Optional[datetime]:
-    """Try to infer an event date from common temporal phrases in raw text."""
+_HOLIDAYS = {
+    "christmas": (12, 25),
+    "new year": (1, 1),
+    "new year's": (1, 1),
+    "halloween": (10, 31),
+    "valentine": (2, 14),
+    "thanksgiving": (11, 28),
+    "independence day": (7, 4),
+}
+
+
+def _iso_date(raw_input: str) -> Optional[datetime]:
+    """An explicit ISO date, e.g. "1976-07-29"."""
+    match = re.search(r"\b(\d{4}-\d{2}-\d{2})\b", raw_input)
+    if not match:
+        return None
+    try:
+        return datetime.strptime(match.group(1), "%Y-%m-%d").replace(tzinfo=timezone.utc)
+    except ValueError:
+        return None
+
+
+def _anchored_to_today(raw_input: str) -> Optional[datetime]:
+    """Phrases that only mean something relative to when the text was written.
+
+    "yesterday", "three weeks ago", "last summer", "on Friday", and a holiday
+    with no year. A telling never uses these: its dates anchor to other
+    memories, not to the present. Single capture does.
+    """
     text = raw_input.lower()
     today = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
-
-    # Explicit ISO / American style dates
-    iso_match = re.search(r"\b(\d{4}-\d{2}-\d{2})\b", raw_input)
-    if iso_match:
-        try:
-            return datetime.strptime(iso_match.group(1), "%Y-%m-%d").replace(tzinfo=timezone.utc)
-        except ValueError:
-            pass
 
     # Relative phrases
     if "yesterday" in text:
@@ -547,17 +566,31 @@ def _extract_event_date(raw_input: str) -> Optional[datetime]:
             days_since = 7
         return today - timedelta(days=days_since)
 
-    # Holidays with an optional year: "Christmas 2021", "Christmas".
-    holiday_months = {
-        "christmas": (12, 25), "new year": (1, 1), "new year's": (1, 1),
-        "halloween": (10, 31), "valentine": (2, 14),
-        "thanksgiving": (11, 28), "independence day": (7, 4),
-    }
-    for name, (month, day) in holiday_months.items():
+    # A holiday with no year named, e.g. "Christmas" — assumed to be the
+    # recent one. A holiday *with* a year is a stated date, not an anchored one.
+    for name, (month, day) in _HOLIDAYS.items():
         holiday_match = re.search(rf"{name}(?:'s)?(?:\s+(\d{{4}}))?", text)
+        if holiday_match and not holiday_match.group(1):
+            return datetime(today.year, month, day).replace(tzinfo=timezone.utc)
+
+    return None
+
+
+def _stated_date(raw_input: str) -> Optional[datetime]:
+    """Dates the text states outright, needing no anchor at all.
+
+    A holiday named with its year, month-day-year, month-year, and a bare
+    year. These are the ones a telling can trust a single segment to carry.
+    """
+    text = raw_input.lower()
+
+    # Holiday with an explicit year: "Christmas 2021".
+    for name, (month, day) in _HOLIDAYS.items():
+        holiday_match = re.search(rf"{name}(?:'s)?\s+(\d{{4}})", text)
         if holiday_match:
-            year = int(holiday_match.group(1)) if holiday_match.group(1) else today.year
-            return datetime(year, month, day).replace(tzinfo=timezone.utc)
+            return datetime(int(holiday_match.group(1)), month, day).replace(
+                tzinfo=timezone.utc
+            )
 
     # Full month-day-year, e.g. "July 29, 1976" or "July 29th, 1976"
     month_day_year_match = re.search(
@@ -574,14 +607,6 @@ def _extract_event_date(raw_input: str) -> Optional[datetime]:
         except ValueError:
             pass
 
-    # Numeric dates: 07/29/1976 or 1976-07-29
-    numeric_match = re.search(r"\b(\d{4}-\d{2}-\d{2})\b", raw_input)
-    if numeric_match:
-        try:
-            return datetime.strptime(numeric_match.group(1), "%Y-%m-%d").replace(tzinfo=timezone.utc)
-        except ValueError:
-            pass
-
     # Month year, e.g. "July 2025"
     month_year_match = re.search(
         r"\b(january|february|march|april|may|june|july|august|september|october|november|december)\s+(\d{4})\b",
@@ -589,7 +614,9 @@ def _extract_event_date(raw_input: str) -> Optional[datetime]:
     )
     if month_year_match:
         try:
-            dt = datetime.strptime(f"{month_year_match.group(1)} {month_year_match.group(2)}", "%B %Y")
+            dt = datetime.strptime(
+                f"{month_year_match.group(1)} {month_year_match.group(2)}", "%B %Y"
+            )
             return dt.replace(tzinfo=timezone.utc)
         except ValueError:
             pass
@@ -603,6 +630,29 @@ def _extract_event_date(raw_input: str) -> Optional[datetime]:
             pass
 
     return None
+
+
+def absolute_date(raw_input: str) -> Optional[datetime]:
+    """Dates the text states outright, with no anchor to today.
+
+    The half of date resolution a telling can use: a stated date resets its
+    cursor. Anchoring to the present is excluded on purpose — see
+    ``_anchored_to_today``.
+    """
+    return _iso_date(raw_input) or _stated_date(raw_input)
+
+
+def _extract_event_date(raw_input: str) -> Optional[datetime]:
+    """Try to infer an event date from common temporal phrases in raw text.
+
+    Precedence is unchanged from before the split: an explicit ISO date, then
+    phrases anchored to today, then dates the text states outright.
+    """
+    return (
+        _iso_date(raw_input)
+        or _anchored_to_today(raw_input)
+        or _stated_date(raw_input)
+    )
 
 
 def _fallback_structured_memory(raw_input: str) -> StructuredMemory:
