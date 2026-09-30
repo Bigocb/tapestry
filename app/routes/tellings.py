@@ -114,7 +114,12 @@ async def capture_telling(
     # content on each segment is authoritative.
     proposed = await segment_transcript(payload.raw_transcript)
 
-    for ordinal, segment in enumerate(proposed):
+    # The period the account is about belongs to the telling rather than to any
+    # one memory, so it is stored once here and inherited by the undated.
+    telling.frame_label = proposed.frame_label
+    telling.frame_date = proposed.frame_date
+
+    for ordinal, segment in enumerate(proposed.segments):
         structured = segment.structured
         db.add(
             TellingSegment(

@@ -15,7 +15,7 @@ from sqlalchemy.orm import sessionmaker
 from app.main import app
 from app.db import Base, User, get_db
 from app.security import hash_password
-from app.agents.telling import ProposedSegment
+from app.agents.telling import ProposedSegment, SegmentationResult
 from app.models.schemas import StructuredMemory, EntityData
 
 
@@ -98,7 +98,7 @@ def fake_segmentation(monkeypatch):
     """
 
     async def _fake(transcript: str):
-        return [
+        return SegmentationResult(segments=[
             ProposedSegment(
                 text=transcript,
                 structured=StructuredMemory(
@@ -110,7 +110,7 @@ def fake_segmentation(monkeypatch):
                     initial_tags=["test"],
                 ),
             )
-        ]
+        ])
 
     monkeypatch.setattr("app.routes.tellings.segment_transcript", _fake)
 
@@ -153,7 +153,7 @@ class TestSegmentedCapture:
         token = get_auth_token("alice", "password123")
 
         async def fake_segment(transcript: str):
-            return [
+            return SegmentationResult(segments=[
                 ProposedSegment(
                     text="In the summer of 1985 we drove down to Florida.",
                     structured=_structured_memory("Trip to Florida"),
@@ -162,7 +162,7 @@ class TestSegmentedCapture:
                     text="The next day we went to Disney.",
                     structured=_structured_memory("Disney"),
                 ),
-            ]
+            ])
 
         monkeypatch.setattr("app.routes.tellings.segment_transcript", fake_segment)
 
@@ -183,6 +183,121 @@ class TestSegmentedCapture:
             "Trip to Florida",
             "Disney",
         ]
+
+
+class TestTellingFrame:
+    """The period the account is about belongs to the telling."""
+
+    async def test_the_frame_is_stored_on_the_telling(
+        self, client, setup_users, get_auth_token, monkeypatch
+    ):
+        await setup_users()
+        token = get_auth_token("alice", "password123")
+
+        async def fake_segmentation(transcript: str):
+            return SegmentationResult(
+                segments=[
+                    ProposedSegment(
+                        text=transcript,
+                        structured=_structured_memory("Born in Conway"),
+                        date_settled=True,
+                    )
+                ],
+                frame_label="first month in high school",
+            )
+
+        monkeypatch.setattr(
+            "app.routes.tellings.segment_transcript", fake_segmentation
+        )
+
+        response = client.post(
+            "/api/tellings",
+            json={"raw_transcript": TRANSCRIPT},
+            headers=_auth(token),
+        )
+
+        assert response.status_code == 201
+        assert response.json()["frame_label"] == "first month in high school"
+
+
+class TestInheritedFrameOutcomes:
+    """Inheriting a period is what keeps a memory out of the review queue."""
+
+    async def _commit_one_segment(
+        self, client, token, monkeypatch, structured
+    ):
+        async def fake_segmentation(transcript: str):
+            return SegmentationResult(
+                segments=[
+                    ProposedSegment(
+                        text=transcript,
+                        structured=structured,
+                        date_settled=True,
+                    )
+                ],
+                frame_label=structured.date_label,
+            )
+
+        monkeypatch.setattr(
+            "app.routes.tellings.segment_transcript", fake_segmentation
+        )
+        draft = client.post(
+            "/api/tellings",
+            json={"raw_transcript": TRANSCRIPT},
+            headers=_auth(token),
+        ).json()
+        committed = client.post(
+            f"/api/tellings/{draft['id']}/commit", headers=_auth(token)
+        ).json()
+        return client.get(
+            f"/api/memories/{committed['segments'][0]['memory_id']}",
+            headers=_auth(token),
+        ).json()
+
+    async def test_an_inherited_period_keeps_the_memory_out_of_review(
+        self, client, setup_users, get_auth_token, monkeypatch
+    ):
+        await setup_users()
+        token = get_auth_token("alice", "password123")
+
+        memory = await self._commit_one_segment(
+            client,
+            token,
+            monkeypatch,
+            StructuredMemory(
+                title="Lockers",
+                summary="The first day.",
+                entities=[],
+                importance_level=5,
+                initial_tags=[],
+                date_label="first month in high school",
+            ),
+        )
+
+        assert memory["date_label"] == "first month in high school"
+        assert memory["needs_review"] is False
+
+    async def test_no_signal_and_no_frame_still_reaches_the_review_queue(
+        self, client, setup_users, get_auth_token, monkeypatch
+    ):
+        await setup_users()
+        token = get_auth_token("alice", "password123")
+
+        memory = await self._commit_one_segment(
+            client,
+            token,
+            monkeypatch,
+            StructuredMemory(
+                title="Something happened",
+                summary="No idea when.",
+                entities=[],
+                importance_level=5,
+                initial_tags=[],
+            ),
+        )
+
+        assert memory["needs_review"] is True
+        assert memory["review_reason"] == "missing_date"
 
 
 class TestSegmentDates:
@@ -419,7 +534,7 @@ class TestCommitTelling:
 
         async def _counting_segmentation(transcript: str):
             calls.append(transcript)
-            return [
+            return SegmentationResult(segments=[
                 ProposedSegment(
                     text=transcript,
                     structured=StructuredMemory(
@@ -431,7 +546,7 @@ class TestCommitTelling:
                         initial_tags=["test"],
                     ),
                 )
-            ]
+            ])
 
         monkeypatch.setattr(
             "app.routes.tellings.segment_transcript", _counting_segmentation
@@ -470,7 +585,7 @@ class TestCommitTelling:
         token = get_auth_token("alice", "password123")
 
         async def _segmentation(transcript: str):
-            return [
+            return SegmentationResult(segments=[
                 ProposedSegment(
                     text=transcript,
                     structured=StructuredMemory(
@@ -484,7 +599,7 @@ class TestCommitTelling:
                         date_precision="year",
                     ),
                 )
-            ]
+            ])
 
         monkeypatch.setattr(
             "app.routes.tellings.segment_transcript", _segmentation
@@ -522,7 +637,7 @@ class TestDraftIsolation:
 
     async def _draft(self, client, token, monkeypatch):
         async def _segmentation(transcript: str):
-            return [
+            return SegmentationResult(segments=[
                 ProposedSegment(
                     text=transcript,
                     structured=StructuredMemory(
@@ -534,7 +649,7 @@ class TestDraftIsolation:
                         initial_tags=["trip", "raleigh"],
                     ),
                 )
-            ]
+            ])
 
         monkeypatch.setattr(
             "app.routes.tellings.segment_transcript", _segmentation

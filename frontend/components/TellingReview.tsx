@@ -83,6 +83,12 @@ export function TellingReview({ tellingId }: { tellingId: string }) {
 
       <section>
         <h2 className="text-xl font-bold mb-4">Proposed memories</h2>
+        {telling.frame_label ? (
+          <p className="mb-3 text-gray-600">
+            This telling is about:{" "}
+            <span className="font-medium">{telling.frame_label}</span>
+          </p>
+        ) : null}
         <div className="space-y-4">
           {telling.segments.map((segment) => (
             <SegmentCard

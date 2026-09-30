@@ -8,7 +8,11 @@ tomorrow — and a year stated once may govern several memories that follow.
 from datetime import datetime, timezone
 
 from app.agents.capture import ResolvedDate
-from app.agents.telling_dates import resolve_telling_dates
+from app.agents.telling_dates import (
+    derive_frame,
+    inherit_frame,
+    resolve_telling_dates,
+)
 
 
 class TestResolveTellingDates:
@@ -130,3 +134,70 @@ class TestResolveTellingDates:
         assert dates[1].label == "August 2003"
         # Two years later it describes nothing true.
         assert dates[2].label is None
+
+
+class TestTellingFrame:
+    """The period a telling as a whole is about."""
+
+    def test_the_frame_is_the_label_most_segments_share(self):
+        frame = derive_frame(
+            [
+                ResolvedDate(label="first month in high school"),
+                ResolvedDate(label="first month in high school"),
+                ResolvedDate(label="the welcome dance"),
+            ]
+        )
+
+        assert frame.label == "first month in high school"
+
+    def test_undated_segments_inherit_the_frame(self):
+        frame = derive_frame(
+            [
+                ResolvedDate(label="first month in high school"),
+                ResolvedDate(label="first month in high school"),
+            ]
+        )
+
+        dates = inherit_frame(
+            [
+                ResolvedDate(
+                    event_date=datetime(2003, 8, 1),
+                    precision="month",
+                    label="first month in high school",
+                ),
+                # Nothing at all: no date, no wording of its own.
+                ResolvedDate(),
+            ],
+            frame,
+        )
+
+        assert dates[1].label == "first month in high school"
+        # The frame supplies a period, not a date.
+        assert dates[1].event_date is None
+
+    def test_a_segment_with_its_own_signal_is_left_alone(self):
+        frame = derive_frame(
+            [ResolvedDate(label="high school"), ResolvedDate(label="high school")]
+        )
+
+        dates = inherit_frame(
+            [
+                ResolvedDate(event_date=datetime(1994, 7, 1), precision="exact"),
+                ResolvedDate(label="the wedding", precision="unknown"),
+            ],
+            frame,
+        )
+
+        assert dates[0].label is None
+        assert dates[0].event_date == datetime(1994, 7, 1)
+        assert dates[1].label == "the wedding"
+
+    def test_no_shared_label_means_no_frame(self):
+        frame = derive_frame([ResolvedDate(), ResolvedDate()])
+        assert frame.label is None
+
+        # With no frame there is nothing to inherit, and the segment stays
+        # honestly undated — which is what puts it in the review queue.
+        dates = inherit_frame([ResolvedDate()], frame)
+        assert dates[0].label is None
+        assert dates[0].event_date is None

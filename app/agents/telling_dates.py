@@ -11,6 +11,7 @@ is retrospective, so its only anchors are the dates it states itself.
 
 import calendar
 import re
+from collections import Counter
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Sequence
@@ -204,6 +205,60 @@ def _shift(date: ResolvedDate, offset: RelativeOffset) -> ResolvedDate:
         event_date_end=None,
         label=label,
     )
+
+
+@dataclass(frozen=True)
+class TellingFrame:
+    """The period a telling as a whole is about, if it names one.
+
+    Fuzzy on purpose: "high school" is a real answer, and a memory that says
+    nothing about when it happened is better placed by the telling's own period
+    than left undated.
+    """
+
+    label: Optional[str] = None
+    date: Optional[datetime] = None
+
+
+def derive_frame(dates: Sequence[ResolvedDate]) -> TellingFrame:
+    """Take the telling's period from the label its segments most share.
+
+    When an account names a period the segmenter applies that wording to each
+    memory it covers, so the most common label is the frame. No shared label
+    means the account named no period, and the frame stays empty rather than
+    being guessed at.
+    """
+    labels = [date.label for date in dates if date.label]
+    if not labels:
+        return TellingFrame()
+
+    label = Counter(labels).most_common(1)[0][0]
+    stated = [
+        date.event_date
+        for date in dates
+        if date.label == label and date.event_date is not None
+    ]
+
+    return TellingFrame(label=label, date=min(stated) if stated else None)
+
+
+def inherit_frame(
+    dates: list[ResolvedDate], frame: TellingFrame
+) -> list[ResolvedDate]:
+    """Give the frame's wording to anything with no time signal at all.
+
+    Only the genuinely undated inherit. A segment with its own date, or its own
+    wording, keeps it: the frame is a fallback, never an override.
+    """
+    if not frame.label:
+        return dates
+
+    return [
+        ResolvedDate(label=frame.label, precision="unknown")
+        if date.event_date is None and not date.label
+        else date
+        for date in dates
+    ]
 
 
 def resolve_telling_dates(

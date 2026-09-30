@@ -193,6 +193,19 @@ describe("TellingReview dates", () => {
     // Silence would hide a draft the user still needs to date.
     expect(within(cards[2]).getByText("No date")).toBeInTheDocument();
   });
+
+  it("shows the period the telling is about", async () => {
+    vi.mocked(api.getTelling).mockResolvedValue(
+      telling({ frame_label: "first month in high school" })
+    );
+
+    render(<TellingReview tellingId="t1" />);
+
+    // Without this the inherited label appears from nowhere.
+    expect(
+      await screen.findByText(/first month in high school/)
+    ).toBeInTheDocument();
+  });
 });
 
 describe("TellingReview date correction", () => {

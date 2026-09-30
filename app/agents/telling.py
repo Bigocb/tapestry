@@ -11,7 +11,8 @@ truth, so exact partitioning is not needed.
 """
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Optional
 
 from app.agents.capture import (
@@ -20,7 +21,12 @@ from app.agents.capture import (
     _call_ollama_chat,
     structure_memory,
 )
-from app.agents.telling_dates import resolve_telling_dates
+from app.agents.telling_dates import (
+    TellingFrame,
+    derive_frame,
+    inherit_frame,
+    resolve_telling_dates,
+)
 from app.models.schemas import StructuredMemory
 
 
@@ -83,6 +89,19 @@ class ProposedSegment:
     date_settled: bool = False
 
 
+@dataclass
+class SegmentationResult:
+    """A telling's proposed split, and the period the account is about.
+
+    The frame belongs to the telling rather than to any one memory, so it
+    travels with the result instead of being repeated on every segment.
+    """
+
+    segments: list["ProposedSegment"] = field(default_factory=list)
+    frame_label: Optional[str] = None
+    frame_date: Optional[datetime] = None
+
+
 def _build_segmentation_prompt(transcript: str) -> str:
     return (
         "Split this account into the memories it contains:\n\n"
@@ -138,17 +157,23 @@ def _segment_date(segment: ProposedSegment) -> Optional[ResolvedDate]:
     )
 
 
-def _apply_story_dates(segments: list[ProposedSegment]) -> None:
-    """Let the narrative date any segment that could not date itself.
+def _apply_story_dates(segments: list[ProposedSegment]) -> TellingFrame:
+    """Date the segments from the narrative, and return the telling's period.
 
     Runs after parsing, because it needs every segment's text at once. A
     segment that already carries a date keeps it and anchors the cursor for
-    those that follow.
+    those that follow; anything the cursor cannot reach inherits the telling's
+    own period rather than going undated.
     """
     known = [_segment_date(segment) for segment in segments]
     resolved = resolve_telling_dates(
         [segment.text for segment in segments], known
     )
+
+    # Cursor first, frame second: a precise answer always beats a vague one, so
+    # only what is still undated inherits the telling's own wording.
+    frame = derive_frame(resolved)
+    resolved = inherit_frame(resolved, frame)
 
     for segment, date in zip(segments, resolved):
         # Nothing to say: leave whatever the segment already had rather than
@@ -161,6 +186,8 @@ def _apply_story_dates(segments: list[ProposedSegment]) -> None:
         structured.date_precision = date.precision
         structured.event_date_end = date.event_date_end
         structured.date_label = date.label
+
+    return frame
 
 
 def _year_is_supported(text: str, year: int) -> bool:
@@ -240,22 +267,30 @@ async def _fallback_segment(transcript: str) -> ProposedSegment:
     )
 
 
-async def segment_transcript(transcript: str) -> list[ProposedSegment]:
-    """Split a recounting into the memories it contains.
+async def segment_transcript(transcript: str) -> SegmentationResult:
+    """Split a recounting into the memories it contains, and frame the telling.
 
-    Falls back to a single segment covering the whole account whenever the
-    model is unreachable or returns nothing usable.
+    Falls back to a single segment covering the whole account whenever the model
+    is unreachable or returns nothing usable. The fallback is dated the same way
+    everything else is, so an outage costs the split but not the dates.
     """
+    segments: list[ProposedSegment] = []
+
     if transcript and transcript.strip():
         try:
             raw = await _call_ollama_chat(
                 _build_segmentation_prompt(transcript), SEGMENTATION_SYSTEM_PROMPT
             )
             segments = _parse_segments(raw)
-            if segments:
-                _apply_story_dates(segments)
-                return segments
         except Exception:
-            pass
+            segments = []
 
-    return [await _fallback_segment(transcript)]
+    if not segments:
+        segments = [await _fallback_segment(transcript)]
+
+    frame = _apply_story_dates(segments)
+    return SegmentationResult(
+        segments=segments,
+        frame_label=frame.label,
+        frame_date=frame.date,
+    )

@@ -43,7 +43,7 @@ class TestSegmentTranscript:
 
         monkeypatch.setattr(telling, "_call_ollama_chat", fake_chat)
 
-        segments = await segment_transcript(TRANSCRIPT)
+        segments = (await segment_transcript(TRANSCRIPT)).segments
 
         assert [segment.text for segment in segments] == [
             "So in the summer of 1985 we drove down to Florida.",
@@ -78,7 +78,7 @@ class TestSegmentTranscript:
 
         monkeypatch.setattr(telling, "_call_ollama_chat", fake_chat)
 
-        segments = await segment_transcript(TRANSCRIPT)
+        segments = (await segment_transcript(TRANSCRIPT)).segments
         structured = segments[0].structured
 
         assert structured.importance_level == 10
@@ -104,7 +104,7 @@ class TestSegmentTranscript:
 
         monkeypatch.setattr(telling, "_call_ollama_chat", fake_chat)
 
-        segments = await segment_transcript(TRANSCRIPT)
+        segments = (await segment_transcript(TRANSCRIPT)).segments
 
         assert [segment.text for segment in segments] == [
             "First memory.",
@@ -132,7 +132,7 @@ class TestSegmentTranscript:
         monkeypatch.setattr(telling, "_call_ollama_chat", failing_chat)
         monkeypatch.setattr(telling, "structure_memory", fake_structure)
 
-        segments = await segment_transcript(TRANSCRIPT)
+        segments = (await segment_transcript(TRANSCRIPT)).segments
 
         assert len(segments) == 1
         assert segments[0].text == TRANSCRIPT
@@ -157,7 +157,7 @@ class TestSegmentTranscript:
         monkeypatch.setattr(telling, "_call_ollama_chat", junk_chat)
         monkeypatch.setattr(telling, "structure_memory", fake_structure)
 
-        segments = await segment_transcript(TRANSCRIPT)
+        segments = (await segment_transcript(TRANSCRIPT)).segments
 
         assert len(segments) == 1
         assert segments[0].text == TRANSCRIPT
@@ -187,7 +187,7 @@ class TestSegmentTranscript:
 
         monkeypatch.setattr(telling, "_call_ollama_chat", fake_chat)
 
-        segments = await segment_transcript(TRANSCRIPT)
+        segments = (await segment_transcript(TRANSCRIPT)).segments
         structured = segments[0].structured
 
         assert structured.event_date is None
@@ -219,7 +219,7 @@ class TestSegmentTranscript:
 
         monkeypatch.setattr(telling, "_call_ollama_chat", fake_chat)
 
-        segments = await segment_transcript(TRANSCRIPT)
+        segments = (await segment_transcript(TRANSCRIPT)).segments
         structured = segments[0].structured
 
         assert structured.event_date is None
@@ -244,7 +244,7 @@ class TestSegmentTranscript:
 
         monkeypatch.setattr(telling, "_call_ollama_chat", fake_chat)
 
-        segments = await segment_transcript(TRANSCRIPT)
+        segments = (await segment_transcript(TRANSCRIPT)).segments
         structured = segments[0].structured
 
         assert structured.event_date is not None
@@ -276,7 +276,58 @@ class TestSegmentTranscript:
 
         monkeypatch.setattr(telling, "_call_ollama_chat", fake_chat)
 
-        segments = await segment_transcript(TRANSCRIPT)
+        segments = (await segment_transcript(TRANSCRIPT)).segments
 
         assert segments[0].structured.event_date.date() == date(1976, 7, 29)
         assert segments[1].structured.event_date.date() == date(1976, 7, 30)
+
+    @pytest.mark.asyncio
+    async def test_returns_the_telling_frame_alongside_its_segments(
+        self, monkeypatch
+    ):
+        """The period the account is about belongs to the telling, not a segment."""
+
+        async def fake_chat(prompt, system_prompt=None):
+            return {
+                "segments": [
+                    {"text": "First memory.", "title": "One", "date_label": "high school"},
+                    {"text": "Second memory.", "title": "Two", "date_label": "high school"},
+                    {"text": "Third memory.", "title": "Three", "date_label": "high school"},
+                ]
+            }
+
+        monkeypatch.setattr(telling, "_call_ollama_chat", fake_chat)
+
+        result = await segment_transcript(TRANSCRIPT)
+
+        assert [segment.text for segment in result.segments] == [
+            "First memory.",
+            "Second memory.",
+            "Third memory.",
+        ]
+        assert result.frame_label == "high school"
+
+    @pytest.mark.asyncio
+    async def test_an_undated_segment_inherits_the_frame(self, monkeypatch):
+        """What the account is about rescues a memory that never says when."""
+
+        async def fake_chat(prompt, system_prompt=None):
+            return {
+                "segments": [
+                    {"text": "First memory.", "title": "One", "date_label": "high school"},
+                    {
+                        "text": "Second memory.",
+                        "title": "Two",
+                        "event_date": None,
+                        "date_precision": None,
+                        "date_label": None,
+                    },
+                ]
+            }
+
+        monkeypatch.setattr(telling, "_call_ollama_chat", fake_chat)
+
+        result = await segment_transcript(TRANSCRIPT)
+
+        assert result.segments[1].structured.date_label == "high school"
+        assert result.segments[1].structured.event_date is None
