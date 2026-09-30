@@ -2,9 +2,10 @@
 
 import { useState, useRef } from "react";
 import { api } from "@/lib/api";
+import { TellingCapture } from "@/components/TellingCapture";
 
 export function CapturePanel() {
-  const [mode, setMode] = useState<"text" | "voice" | "form">("text");
+  const [mode, setMode] = useState<"text" | "voice" | "form" | "story">("text");
 
   return (
     <div className="max-w-2xl mx-auto">
@@ -19,10 +20,14 @@ export function CapturePanel() {
         <ModeButton active={mode === "form"} onClick={() => setMode("form")}>
           Form
         </ModeButton>
+        <ModeButton active={mode === "story"} onClick={() => setMode("story")}>
+          Story
+        </ModeButton>
       </div>
       {mode === "text" && <TextCapture />}
       {mode === "voice" && <VoiceCapture />}
       {mode === "form" && <FormCapture />}
+      {mode === "story" && <TellingCapture />}
     </div>
   );
 }
