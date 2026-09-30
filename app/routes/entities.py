@@ -7,11 +7,12 @@ rather than the denormalized column, which includes locked memories.
 """
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Optional
 from uuid import UUID
 
-from app.db import get_db, User
+from app.db import MemoryEntity, get_db, User
 from app.db.entities import (
     FIRST_CLASS_KINDS,
     count_entities_by_kind,
@@ -225,12 +226,28 @@ async def split_entity_endpoint(
     db: AsyncSession = Depends(get_db),
 ) -> EntitySplitResponse:
     """Pull some of an entity's memories out into a new entity."""
+    # What moves is a mention, since that is what belongs to an entity. The
+    # caller names memories, so they are resolved here rather than making every
+    # caller learn about mentions.
+    mention_rows = await db.execute(
+        select(MemoryEntity)
+        .where(MemoryEntity.entity_id == entity_id)
+        .where(MemoryEntity.memory_id.in_([str(m) for m in request.memory_ids]))
+    )
+    mention_ids = [str(row.id) for row in mention_rows.scalars().all()]
+
+    if len(mention_ids) != len(set(str(m) for m in request.memory_ids)):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Some of those memories are not on this entity",
+        )
+
     try:
         split = await split_entity(
             db,
             str(current_user.id),
             str(entity_id),
-            [str(mention_id) for mention_id in request.mention_ids],
+            mention_ids,
             request.name,
         )
     except ValueError as exc:

@@ -576,7 +576,9 @@ class EntitySplitRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     name: str = Field(..., min_length=1, max_length=255)
-    mention_ids: List[UUID] = Field(..., min_length=1)
+    # Memories, not mentions: a caller thinks in "this memory is the wrong
+    # Dave", and which mention that is happens to be an implementation detail.
+    memory_ids: List[UUID] = Field(..., min_length=1)
 
 
 class EntitySplitResponse(BaseModel):

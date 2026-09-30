@@ -68,6 +68,55 @@ export function EntityDetailView({ id }: { id: string }) {
   const [notice, setNotice] = useState("");
   const [candidates, setCandidates] = useState<EntitySummaryBase[]>([]);
   const [target, setTarget] = useState("");
+  const [moving, setMoving] = useState<Set<string>>(new Set());
+  const [newName, setNewName] = useState("");
+  const [lastSplit, setLastSplit] = useState<string | null>(null);
+
+  const toggleMoving = (memoryId: string) => {
+    const next = new Set(moving);
+    if (next.has(memoryId)) next.delete(memoryId);
+    else next.add(memoryId);
+    setMoving(next);
+  };
+
+  const splitOut = async () => {
+    if (!entity || moving.size === 0 || !newName.trim()) return;
+    setBusy(true);
+    try {
+      const result = await api.splitEntity(entity.id, {
+        name: newName.trim(),
+        memory_ids: Array.from(moving),
+      });
+      setLastSplit(result.split_id);
+      setNotice(
+        `Moved ${result.moved_mention_count} ${
+          result.moved_mention_count === 1 ? "memory" : "memories"
+        } into “${newName.trim()}”.`
+      );
+      setMoving(new Set());
+      setNewName("");
+      await load();
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Split failed");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const undoTheSplit = async () => {
+    if (!lastSplit) return;
+    setBusy(true);
+    try {
+      await api.undoEntitySplit(lastSplit);
+      setNotice("Split undone.");
+      setLastSplit(null);
+      await load();
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Could not undo the split");
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const load = useCallback(() => {
     return api
@@ -232,6 +281,15 @@ export function EntityDetailView({ id }: { id: string }) {
               Undo merge
             </button>
           )}
+          {lastSplit && (
+            <button
+              onClick={undoTheSplit}
+              disabled={busy}
+              className="text-green-800 underline disabled:opacity-50 shrink-0"
+            >
+              Undo split
+            </button>
+          )}
         </div>
       )}
 
@@ -318,23 +376,63 @@ export function EntityDetailView({ id }: { id: string }) {
         <ul className="space-y-2">
           {entity.memories.map((memory) => (
             <li key={memory.id} className="border rounded p-3 bg-white">
+              <label className="flex items-start gap-2">
+                <input
+                  type="checkbox"
+                  className="mt-1"
+                  aria-label={memory.title || memory.summary || memory.id}
+                  checked={moving.has(memory.id)}
+                  onChange={() => toggleMoving(memory.id)}
+                />
+                <span>
+                  <span className="font-medium">
+                    {memory.title || memory.summary || "Untitled memory"}
+                  </span>
+                  <span className="block text-sm text-gray-500 mt-1">
+                    {formatWhen(memory)}
+                    {memory.role && (
+                      <span className="ml-2 text-xs bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded">
+                        {memory.role}
+                      </span>
+                    )}
+                  </span>
+                </span>
+              </label>
               <Link
                 href={`/memories/${memory.id}`}
-                className="font-medium hover:text-indigo-600"
+                className="text-xs text-indigo-700 underline"
               >
-                {memory.title || memory.summary || "Untitled memory"}
+                Open memory
               </Link>
-              <p className="text-sm text-gray-500 mt-1">
-                {formatWhen(memory)}
-                {memory.role && (
-                  <span className="ml-2 text-xs bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded">
-                    {memory.role}
-                  </span>
-                )}
-              </p>
             </li>
           ))}
         </ul>
+      </section>
+
+      <section className="border rounded p-4">
+        <h2 className="font-semibold mb-1">Split memories into a new entity</h2>
+        <p className="text-sm text-gray-600 mb-2">
+          Tick the memories that are a different{" "}
+          {kindLabel.toLowerCase()}. This is for when two of them were read as
+          one, which undoing a merge cannot fix.
+        </p>
+        <div className="flex gap-2">
+          <input
+            aria-label="New entity name"
+            placeholder="Name for the new entity"
+            className="border rounded p-2 flex-1"
+            value={newName}
+            onChange={(event) => setNewName(event.target.value)}
+          />
+          <button
+            type="button"
+            onClick={splitOut}
+            disabled={busy || moving.size === 0 || !newName.trim()}
+            className="bg-indigo-600 text-white px-4 py-2 rounded hover:bg-indigo-700 disabled:opacity-50"
+          >
+            Split out {moving.size > 0 ? `(${moving.size})` : ""}
+          </button>
+        </div>
       </section>
     </div>
   );

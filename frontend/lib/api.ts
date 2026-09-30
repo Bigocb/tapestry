@@ -346,6 +346,17 @@ export const api = {
     request("POST", "/entities/merge", { source_id, target_id }),
   undoEntityMerge: (mergeId: string) =>
     request("POST", `/entities/merge/${mergeId}/undo`, {}),
+  splitEntity: (id: string, payload: { name: string; memory_ids: string[] }) =>
+    request("POST", `/entities/${id}/split`, payload) as Promise<{
+      split_id: string;
+      source_entity_id: string;
+      new_entity_id: string;
+      moved_mention_count: number;
+    }>,
+  undoEntitySplit: (splitId: string) =>
+    request("POST", `/entities/split/${splitId}/undo`, {}) as Promise<{
+      detail: string;
+    }>,
 
   getTellings: () =>
     request("GET", "/tellings") as Promise<TellingSummary[]>,

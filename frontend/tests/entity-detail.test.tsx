@@ -12,6 +12,8 @@ vi.mock("@/lib/api", () => ({
     getMergeSuggestions: vi.fn(),
     mergeEntities: vi.fn(),
     undoEntityMerge: vi.fn(),
+    splitEntity: vi.fn(),
+    undoEntitySplit: vi.fn(),
   },
 }));
 
@@ -31,7 +33,10 @@ const DAVE = {
   canonical_name: "Dave",
   mention_count: 2,
   aliases: ["dave"],
-  memories: [],
+  memories: [
+    { id: "m1", title: "The wrong Dave", created_at: "2026-01-01T00:00:00" },
+    { id: "m2", title: "The right Dave", created_at: "2026-01-02T00:00:00" },
+  ],
 };
 
 const DAVE_SMITH = {
@@ -68,6 +73,27 @@ describe("EntityDetailView manual merge", () => {
     await user.click(screen.getByRole("button", { name: /^merge$/i }));
 
     expect(api.mergeEntities).toHaveBeenCalledWith("e1", "e9");
+  });
+
+  it("moves the memories you tick into a new entity", async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.splitEntity).mockResolvedValue({
+      split_id: "sp1",
+      source_entity_id: "e1",
+      new_entity_id: "e2",
+      moved_mention_count: 1,
+    });
+
+    render(<EntityDetailView id="e1" />);
+
+    await user.click(await screen.findByLabelText("The wrong Dave"));
+    await user.type(screen.getByLabelText(/new entity name/i), "Dave Smith");
+    await user.click(screen.getByRole("button", { name: /split out/i }));
+
+    expect(api.splitEntity).toHaveBeenCalledWith("e1", {
+      name: "Dave Smith",
+      memory_ids: ["m1"],
+    });
   });
 
   it("never offers the entity itself as a merge target", async () => {
