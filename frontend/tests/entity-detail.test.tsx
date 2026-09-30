@@ -17,6 +17,7 @@ vi.mock("@/lib/api", () => ({
     lookupEntity: vi.fn(),
     keepEntityFact: vi.fn(),
     discardEntityFact: vi.fn(),
+    updateEntity: vi.fn(),
   },
 }));
 
@@ -197,5 +198,80 @@ describe("EntityDetailView manual merge", () => {
     );
 
     expect(options).not.toContain("e1");
+  });
+});
+
+describe("EntityDetailView editing the card", () => {
+  beforeEach(() => {
+    vi.mocked(api.getEntity).mockResolvedValue(THEATRE);
+    vi.mocked(api.getMergeSuggestions).mockResolvedValue([]);
+    vi.mocked(api.getEntities).mockResolvedValue({
+      items: [THEATRE],
+      total: 1,
+      limit: 200,
+      offset: 0,
+    });
+  });
+
+  it("renames a place from the card", async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.updateEntity).mockResolvedValue({
+      ...THEATRE,
+      canonical_name: "Mission Valley Cinemas",
+    });
+
+    render(<EntityDetailView id="e5" />);
+
+    await user.click(await screen.findByRole("button", { name: /^edit$/i }));
+    const name = screen.getByLabelText(/^name$/i);
+    await user.clear(name);
+    await user.type(name, "Mission Valley Cinemas");
+    await user.click(screen.getByRole("button", { name: /^save$/i }));
+
+    expect(api.updateEntity).toHaveBeenCalledWith("e5", {
+      canonical_name: "Mission Valley Cinemas",
+    });
+  });
+
+  it("adds an address to a place, and only the address", async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.updateEntity).mockResolvedValue(THEATRE);
+
+    render(<EntityDetailView id="e5" />);
+
+    await user.click(await screen.findByRole("button", { name: /^edit$/i }));
+    await user.type(
+      screen.getByLabelText(/^address$/i),
+      "1201 Larimer St, Denver"
+    );
+    await user.click(screen.getByRole("button", { name: /^save$/i }));
+
+    // Untouched fields are omitted, not sent back unchanged.
+    expect(api.updateEntity).toHaveBeenCalledWith("e5", {
+      address: "1201 Larimer St, Denver",
+    });
+  });
+
+  it("sends no request when nothing changed", async () => {
+    const user = userEvent.setup();
+    render(<EntityDetailView id="e5" />);
+
+    await user.click(await screen.findByRole("button", { name: /^edit$/i }));
+    await user.click(screen.getByRole("button", { name: /^save$/i }));
+
+    expect(api.updateEntity).not.toHaveBeenCalled();
+  });
+
+  it("offers no address field on a person", async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.getEntity).mockResolvedValue(DAVE);
+
+    render(<EntityDetailView id="e1" />);
+
+    await user.click(await screen.findByRole("button", { name: /^edit$/i }));
+
+    // A person does not have an address; a description is fine.
+    expect(screen.queryByLabelText(/^address$/i)).not.toBeInTheDocument();
+    expect(screen.getByLabelText(/^description$/i)).toBeInTheDocument();
   });
 });

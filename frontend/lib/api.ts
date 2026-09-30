@@ -204,6 +204,21 @@ export interface EntityFact {
   fetched_at: string;
 }
 
+export interface EntityDetail {
+  id: string;
+  kind: string;
+  canonical_name: string;
+  description?: string | null;
+  attributes?: Record<string, unknown> | null;
+  parent_entity_id?: string | null;
+  mention_count: number;
+  first_seen_at?: string | null;
+  last_seen_at?: string | null;
+  aliases: string[];
+  memories: Array<Record<string, unknown>>;
+  facts?: EntityFact[];
+}
+
 export interface TellingSummary {
   id: string;
   status: string;
@@ -359,6 +374,15 @@ export const api = {
     request("GET", "/entities", undefined, { kind, limit, offset }),
   getEntityCounts: () => request("GET", "/entities/counts"),
   getEntity: (id: string) => request("GET", `/entities/${id}`),
+  // A hand edit of the card. Omitted keys are left alone; a present null clears.
+  updateEntity: (
+    id: string,
+    changes: {
+      canonical_name?: string;
+      description?: string | null;
+      address?: string | null;
+    }
+  ) => request("PATCH", `/entities/${id}`, changes) as Promise<EntityDetail>,
   getMergeSuggestions: () => request("GET", "/entities/merge-suggestions"),
   mergeEntities: (source_id: string, target_id: string) =>
     request("POST", "/entities/merge", { source_id, target_id }),

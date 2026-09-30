@@ -78,6 +78,13 @@ function formatWhen(memory: EntityMemoryRef): string {
   return new Date(memory.created_at).toLocaleDateString();
 }
 
+// The address lives in the entity's kind-specific attributes, but is edited and
+// shown as its own thing so the card never has to know that.
+function addressOf(entity: EntityDetail): string {
+  const value = (entity.attributes ?? {}).address;
+  return typeof value === "string" ? value : "";
+}
+
 const actionBoxClass = "bg-surface border border-line rounded-2xl p-5";
 const fieldClass =
   "bg-bg-raised border border-line rounded-lg p-2.5 text-sm text-ink placeholder:text-ink-faint focus:outline-none focus:ring-2 focus:ring-flash/30 focus:border-flash";
@@ -100,6 +107,59 @@ export function EntityDetailView({ id }: { id: string }) {
   const [found, setFound] = useState<LookupCandidate[]>([]);
   const [lookingUp, setLookingUp] = useState(false);
   const [lookedUp, setLookedUp] = useState(false);
+
+  const [editing, setEditing] = useState(false);
+  const [name, setName] = useState("");
+  const [description, setDescription] = useState("");
+  const [address, setAddress] = useState("");
+
+  const startEditing = () => {
+    if (!entity) return;
+    setName(entity.canonical_name);
+    setDescription(entity.description ?? "");
+    setAddress(addressOf(entity));
+    setEditing(true);
+  };
+
+  const saveEdits = async () => {
+    if (!entity) return;
+    const changes: {
+      canonical_name?: string;
+      description?: string | null;
+      address?: string | null;
+    } = {};
+
+    // Only send what actually changed: an omitted field is left alone, and a
+    // present null clears it.
+    if (name.trim() && name.trim() !== entity.canonical_name) {
+      changes.canonical_name = name.trim();
+    }
+    if (description.trim() !== (entity.description ?? "")) {
+      changes.description = description.trim() || null;
+    }
+    if (
+      entity.kind === "place" &&
+      address.trim() !== addressOf(entity)
+    ) {
+      changes.address = address.trim() || null;
+    }
+
+    if (Object.keys(changes).length === 0) {
+      setEditing(false);
+      return;
+    }
+
+    setBusy(true);
+    try {
+      await api.updateEntity(entity.id, changes);
+      setEditing(false);
+      await load();
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Could not save that");
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const lookUp = async () => {
     if (!entity) return;
@@ -355,14 +415,86 @@ export function EntityDetailView({ id }: { id: string }) {
               <MapPinIcon className="w-6 h-6" />
             )}
           </span>
-          <div>
+          <div className="flex-1 min-w-0">
             <h1 className="text-2xl font-bold">{entity.canonical_name}</h1>
             <p className="stamp text-ink-muted mt-1">
               {entity.mention_count}{" "}
               {entity.mention_count === 1 ? "mention" : "mentions"}
             </p>
           </div>
+          {!editing && (
+            <button type="button" onClick={startEditing} className={btnOutline}>
+              Edit
+            </button>
+          )}
         </div>
+
+        {!editing && (entity.description || (entity.kind === "place" && addressOf(entity))) && (
+          <div className="mt-4 space-y-1">
+            {entity.description && (
+              <p className="text-ink-muted text-sm">{entity.description}</p>
+            )}
+            {entity.kind === "place" && addressOf(entity) && (
+              <p className="text-ink-faint text-sm flex items-center gap-1.5">
+                <MapPinIcon className="w-4 h-4 shrink-0" />
+                {addressOf(entity)}
+              </p>
+            )}
+          </div>
+        )}
+
+        {editing && (
+          <div className="mt-4 space-y-3">
+            <label className="block">
+              <span className="stamp text-ink-faint">Name</span>
+              <input
+                aria-label="Name"
+                className={`${fieldClass} w-full mt-1`}
+                value={name}
+                onChange={(event) => setName(event.target.value)}
+              />
+            </label>
+            <label className="block">
+              <span className="stamp text-ink-faint">Description</span>
+              <textarea
+                aria-label="Description"
+                rows={2}
+                className={`${fieldClass} w-full mt-1`}
+                value={description}
+                onChange={(event) => setDescription(event.target.value)}
+              />
+            </label>
+            {entity.kind === "place" && (
+              <label className="block">
+                <span className="stamp text-ink-faint">Address</span>
+                <input
+                  aria-label="Address"
+                  className={`${fieldClass} w-full mt-1`}
+                  value={address}
+                  onChange={(event) => setAddress(event.target.value)}
+                />
+              </label>
+            )}
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={saveEdits}
+                disabled={busy}
+                className={btnSolid}
+              >
+                Save
+              </button>
+              <button
+                type="button"
+                onClick={() => setEditing(false)}
+                disabled={busy}
+                className={btnOutline}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       {notice && (
