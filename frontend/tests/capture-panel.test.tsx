@@ -41,7 +41,7 @@ describe("CapturePanel modes", () => {
     render(<CapturePanel />);
 
     await user.click(screen.getByRole("button", { name: "Story" }));
-    await user.click(screen.getByRole("button", { name: "Text" }));
+    await user.click(screen.getByRole("button", { name: "Memory" }));
 
     expect(
       screen.queryByLabelText(/what do you want to tell/i)
