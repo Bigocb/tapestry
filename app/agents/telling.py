@@ -12,12 +12,15 @@ truth, so exact partitioning is not needed.
 
 import re
 from dataclasses import dataclass
+from typing import Optional
 
 from app.agents.capture import (
+    ResolvedDate,
     _build_structured_memory,
     _call_ollama_chat,
     structure_memory,
 )
+from app.agents.telling_dates import resolve_telling_dates
 from app.models.schemas import StructuredMemory
 
 
@@ -73,6 +76,11 @@ class ProposedSegment:
 
     text: str
     structured: StructuredMemory
+    # True when the segmenter itself answered about this memory's date, even if
+    # the answer was "none". The date cursor must not second-guess that from the
+    # text — doing so puts back the false dates _respect_explicit_null_dates and
+    # _drop_unsupported_exact_date just removed.
+    date_settled: bool = False
 
 
 def _build_segmentation_prompt(transcript: str) -> str:
@@ -102,6 +110,57 @@ def _respect_explicit_null_dates(
         structured.date_precision = "unknown"
     if item.get("date_label") is None:
         structured.date_label = None
+
+
+def _segment_date(segment: ProposedSegment) -> Optional[ResolvedDate]:
+    """What this segment already says about its date, if anything.
+
+    Returns None when the segment is genuinely open to inference by the story
+    cursor, and an empty ResolvedDate when the segmenter answered "no date" —
+    a distinction the cursor needs, since only the first should be re-derived
+    from the text.
+    """
+    structured = segment.structured
+    has_signal = (
+        structured.event_date is not None
+        or bool(structured.date_label)
+        or structured.date_precision not in (None, "unknown")
+    )
+
+    if not has_signal:
+        return ResolvedDate() if segment.date_settled else None
+
+    return ResolvedDate(
+        event_date=structured.event_date,
+        precision=structured.date_precision or "unknown",
+        event_date_end=structured.event_date_end,
+        label=structured.date_label,
+    )
+
+
+def _apply_story_dates(segments: list[ProposedSegment]) -> None:
+    """Let the narrative date any segment that could not date itself.
+
+    Runs after parsing, because it needs every segment's text at once. A
+    segment that already carries a date keeps it and anchors the cursor for
+    those that follow.
+    """
+    known = [_segment_date(segment) for segment in segments]
+    resolved = resolve_telling_dates(
+        [segment.text for segment in segments], known
+    )
+
+    for segment, date in zip(segments, resolved):
+        # Nothing to say: leave whatever the segment already had rather than
+        # clearing a label the model derived.
+        if date.event_date is None and not date.label:
+            continue
+
+        structured = segment.structured
+        structured.event_date = date.event_date
+        structured.date_precision = date.precision
+        structured.event_date_end = date.event_date_end
+        structured.date_label = date.label
 
 
 def _year_is_supported(text: str, year: int) -> bool:
@@ -160,7 +219,13 @@ def _parse_segments(raw: object) -> list[ProposedSegment]:
         structured = _build_structured_memory(item, text)
         _respect_explicit_null_dates(structured, item)
         _drop_unsupported_exact_date(structured, text)
-        segments.append(ProposedSegment(text=text, structured=structured))
+        segments.append(
+            ProposedSegment(
+                text=text,
+                structured=structured,
+                date_settled="event_date" in item,
+            )
+        )
     return segments
 
 
@@ -188,6 +253,7 @@ async def segment_transcript(transcript: str) -> list[ProposedSegment]:
             )
             segments = _parse_segments(raw)
             if segments:
+                _apply_story_dates(segments)
                 return segments
         except Exception:
             pass

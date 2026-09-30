@@ -5,6 +5,8 @@ verbatim span text rather than character offsets, because models miscount
 offsets and the transcript on the telling row stays the source of truth.
 """
 
+from datetime import date
+
 import pytest
 
 from app.agents import telling
@@ -247,3 +249,34 @@ class TestSegmentTranscript:
 
         assert structured.event_date is not None
         assert structured.event_date.year == 1985
+
+    @pytest.mark.asyncio
+    async def test_segments_get_dates_from_the_story_cursor(self, monkeypatch):
+        """A segment with no date of its own is anchored by the one before it."""
+
+        async def fake_chat(prompt, system_prompt=None):
+            return {
+                "segments": [
+                    {
+                        "text": "On July 29, 1976 I was born in Conway.",
+                        "title": "Born in Conway",
+                        "event_date": "1976-07-29T00:00:00",
+                        "date_precision": "exact",
+                        "date_label": None,
+                    },
+                    {
+                        "text": "The next day my grandmother arrived.",
+                        "title": "Grandmother arrives",
+                        "event_date": None,
+                        "date_precision": None,
+                        "date_label": None,
+                    },
+                ]
+            }
+
+        monkeypatch.setattr(telling, "_call_ollama_chat", fake_chat)
+
+        segments = await segment_transcript(TRANSCRIPT)
+
+        assert segments[0].structured.event_date.date() == date(1976, 7, 29)
+        assert segments[1].structured.event_date.date() == date(1976, 7, 30)
