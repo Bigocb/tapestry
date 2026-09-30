@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -70,6 +70,43 @@ describe("TellingCapture", () => {
     );
 
     expect(api.createVoiceTelling).toHaveBeenCalledWith(file);
+    expect(push).toHaveBeenCalledWith("/tellings/t1");
+  });
+
+  it("records a story in the browser and uploads it", async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.createVoiceTelling).mockResolvedValue(CREATED);
+
+    // jsdom has no MediaRecorder, so stand one in that hands back a chunk.
+    class FakeRecorder {
+      ondataavailable: ((event: { data: Blob }) => void) | null = null;
+      onstop: (() => void) | null = null;
+      stream = { getTracks: () => [{ stop: vi.fn() }] };
+      start() {}
+      stop() {
+        this.ondataavailable?.({
+          data: new Blob(["pretend audio"], { type: "audio/webm" }),
+        });
+        this.onstop?.();
+      }
+    }
+
+    vi.stubGlobal("MediaRecorder", FakeRecorder);
+    Object.defineProperty(navigator, "mediaDevices", {
+      value: { getUserMedia: vi.fn().mockResolvedValue({}) },
+      configurable: true,
+    });
+
+    render(<TellingCapture />);
+
+    await user.click(
+      screen.getByRole("button", { name: /start recording/i })
+    );
+    await user.click(screen.getByRole("button", { name: /stop recording/i }));
+
+    await waitFor(() => expect(api.createVoiceTelling).toHaveBeenCalled());
+    const uploaded = vi.mocked(api.createVoiceTelling).mock.calls[0][0];
+    expect(uploaded).toBeInstanceOf(File);
     expect(push).toHaveBeenCalledWith("/tellings/t1");
   });
 

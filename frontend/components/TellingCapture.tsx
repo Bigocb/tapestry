@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 
 import { api, type TellingSummary } from "@/lib/api";
 
@@ -45,6 +45,48 @@ export function TellingCapture() {
       setError("Could not submit your story.");
       setBusy(false);
     }
+  }
+
+  const [recording, setRecording] = useState(false);
+  const mediaRef = useRef<MediaRecorder | null>(null);
+  const chunksRef = useRef<Blob[]>([]);
+
+  async function startRecording() {
+    setError(null);
+    chunksRef.current = [];
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: true,
+      });
+      const recorder = new MediaRecorder(stream);
+      recorder.ondataavailable = (event) => {
+        if (event.data.size > 0) chunksRef.current.push(event.data);
+      };
+      recorder.onstop = async () => {
+        const blob = new Blob(chunksRef.current, { type: "audio/webm" });
+        setBusy(true);
+        try {
+          const telling = await api.createVoiceTelling(
+            new File([blob], "telling.webm", { type: "audio/webm" })
+          );
+          router.push(`/tellings/${telling.id}`);
+        } catch {
+          setError("Could not upload your recording.");
+          setBusy(false);
+        }
+      };
+      mediaRef.current = recorder;
+      recorder.start();
+      setRecording(true);
+    } catch {
+      setError("Microphone access denied or unavailable");
+    }
+  }
+
+  function stopRecording() {
+    mediaRef.current?.stop();
+    mediaRef.current?.stream.getTracks().forEach((track) => track.stop());
+    setRecording(false);
   }
 
   async function submitAudio(event: FormEvent) {
@@ -105,6 +147,21 @@ export function TellingCapture() {
           {busy ? "Splitting…" : "Tell it"}
         </button>
       </form>
+
+      <div className="space-y-4 border-t pt-4">
+        <button
+          type="button"
+          onClick={recording ? stopRecording : startRecording}
+          disabled={busy}
+          className={`px-6 py-3 rounded-full font-semibold disabled:opacity-50 ${
+            recording
+              ? "bg-red-600 text-white animate-pulse"
+              : "bg-indigo-600 text-white hover:bg-indigo-700"
+          }`}
+        >
+          {recording ? "Stop recording" : "Start recording"}
+        </button>
+      </div>
 
       <form onSubmit={submitAudio} className="space-y-4 border-t pt-4">
         <label className="block">
