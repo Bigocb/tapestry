@@ -10,9 +10,9 @@ export default function CapturePage() {
     <Protected>
       <Layout>
         <CapturePanel />
-        <section>
-          <h2>Or tell the whole story</h2>
-          <p>
+        <section className="max-w-2xl mx-auto mt-12">
+          <h2 className="text-2xl font-bold mb-2">Or tell the whole story</h2>
+          <p className="text-gray-600 mb-4">
             Give one long account and review how it splits into memories before
             anything is saved.
           </p>

@@ -52,35 +52,57 @@ export function TellingReview({ tellingId }: { tellingId: string }) {
     }
   }
 
-  if (error) return <p>{error}</p>;
-  if (!telling) return <p>Loading…</p>;
+  if (error) return <p className="text-red-600">{error}</p>;
+  if (!telling) return <p className="text-gray-500">Loading…</p>;
 
   return (
-    <div>
+    <div className="max-w-3xl mx-auto space-y-8">
       <section>
-        <h1>Tell a story</h1>
-        <p data-testid="telling-transcript">{telling.raw_transcript}</p>
+        <h1 className="text-2xl font-bold mb-4">Tell a story</h1>
+        <div className="border rounded p-4 bg-gray-50">
+          <p className="text-xs uppercase tracking-wide text-gray-500 mb-2">
+            What you said
+          </p>
+          <p
+            data-testid="telling-transcript"
+            className="whitespace-pre-wrap text-gray-700"
+          >
+            {telling.raw_transcript}
+          </p>
+        </div>
       </section>
 
       <section>
-        <h2>Proposed memories</h2>
-        {telling.segments.map((segment) => (
-          <SegmentCard
-            key={segment.id}
-            tellingId={telling.id}
-            segment={segment}
-            onSaved={replaceSegment}
-          />
-        ))}
+        <h2 className="text-xl font-bold mb-4">Proposed memories</h2>
+        <div className="space-y-4">
+          {telling.segments.map((segment) => (
+            <SegmentCard
+              key={segment.id}
+              tellingId={telling.id}
+              segment={segment}
+              onSaved={replaceSegment}
+            />
+          ))}
+        </div>
       </section>
 
-      <section>
+      <section className="space-y-3">
         {telling.status === "committed" ? null : (
-          <button type="button" onClick={commit} disabled={committing}>
+          <button
+            type="button"
+            onClick={commit}
+            disabled={committing}
+            className="bg-indigo-600 text-white px-4 py-2 rounded hover:bg-indigo-700 disabled:opacity-50"
+          >
             Save these memories
           </button>
         )}
-        {result ? <p>{result}</p> : null}
+        {result && (
+          <div className="border rounded p-4 bg-green-50">
+            <h3 className="font-semibold text-green-800">Saved</h3>
+            <p className="text-sm text-gray-600">{result}</p>
+          </div>
+        )}
       </section>
     </div>
   );
@@ -121,22 +143,45 @@ function SegmentCard({
   }
 
   return (
-    <article data-testid="telling-segment">
-      <h3>{segment.title}</h3>
-      <p>{segment.text}</p>
+    <article
+      data-testid="telling-segment"
+      className={`border rounded p-4 space-y-3 ${
+        segment.status === "rejected" ? "bg-gray-50 opacity-75" : "bg-white"
+      }`}
+    >
+      <h3 className="font-semibold">{segment.title}</h3>
+      <p className="text-sm text-gray-600">{segment.text}</p>
       {segment.status === "rejected" ? (
-        <p>Rejected — this will not become a memory.</p>
+        <p className="text-sm text-amber-700">
+          Rejected — this will not become a memory.
+        </p>
       ) : null}
-      <label>
-        Title
-        <input value={title} onChange={(event) => setTitle(event.target.value)} />
+      <label className="block">
+        <span className="block text-sm font-medium mb-1">Title</span>
+        <input
+          className="w-full border rounded p-2"
+          value={title}
+          onChange={(event) => setTitle(event.target.value)}
+        />
       </label>
-      <button type="button" onClick={save} disabled={saving}>
-        Save
-      </button>
-      <button type="button" onClick={reject} disabled={saving}>
-        Reject
-      </button>
+      <div className="flex gap-2">
+        <button
+          type="button"
+          onClick={save}
+          disabled={saving}
+          className="bg-indigo-600 text-white px-4 py-2 rounded hover:bg-indigo-700 disabled:opacity-50"
+        >
+          Save
+        </button>
+        <button
+          type="button"
+          onClick={reject}
+          disabled={saving}
+          className="border px-4 py-2 rounded hover:bg-gray-50 disabled:opacity-50"
+        >
+          Reject
+        </button>
+      </div>
     </article>
   );
 }

@@ -25,18 +25,23 @@ export function TellingCapture() {
   }
 
   return (
-    <form onSubmit={submit}>
-      <label>
-        What do you want to tell?
+    <form onSubmit={submit} className="space-y-4">
+      <label className="block">
+        <span className="block font-medium mb-1">What do you want to tell?</span>
         <textarea
+          className="w-full border rounded p-3 h-40"
           value={transcript}
           onChange={(event) => setTranscript(event.target.value)}
         />
       </label>
-      <button type="submit" disabled={busy}>
-        Tell it
+      <button
+        type="submit"
+        disabled={busy}
+        className="bg-indigo-600 text-white px-4 py-2 rounded hover:bg-indigo-700 disabled:opacity-50"
+      >
+        {busy ? "Splitting…" : "Tell it"}
       </button>
-      {error ? <p>{error}</p> : null}
+      {error && <p className="text-red-600">{error}</p>}
     </form>
   );
 }
