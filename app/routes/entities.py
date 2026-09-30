@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Optional
 from uuid import UUID
 
-from app.db import EntityFact, MemoryEntity, get_db, User
+from app.db import Entity, EntityFact, Memory, MemoryEntity, get_db, User
 from app.db.entities import (
     FIRST_CLASS_KINDS,
     _load_owned_entity,
@@ -24,6 +24,7 @@ from app.db.entities import (
     suggest_merges,
     undo_merge,
     undo_split,
+    update_entity,
 )
 from app.lookup import search_places
 from app.dependencies import get_current_user
@@ -39,6 +40,7 @@ from app.models.schemas import (
     EntitySplitRequest,
     EntitySplitResponse,
     EntitySummary,
+    EntityUpdateRequest,
     LookupCandidate,
 )
 from app.privacy import get_unlocked_memory_ids
@@ -427,6 +429,60 @@ async def discard_fact(
     await db.commit()
 
 
+@router.patch(
+    "/entities/{entity_id}",
+    response_model=EntityDetail,
+    summary="Edit an entity by hand",
+    description=(
+        "Change a place's name, description or address. A rename keeps the old "
+        "spelling as an alias so existing memories still resolve here, and "
+        "refuses a name another entity of the same kind already has — that is a "
+        "merge. Declared before GET /entities/{entity_id} so the static-free "
+        "path stays unambiguous."
+    ),
+)
+async def update_entity_endpoint(
+    entity_id: UUID,
+    request: EntityUpdateRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    unlocked_ids: set[str] = Depends(get_unlocked_memory_ids),
+) -> EntityDetail:
+    """Apply a hand edit and return the entity's refreshed card."""
+    fields = request.model_fields_set
+    kwargs = {}
+    if "canonical_name" in fields:
+        kwargs["canonical_name"] = request.canonical_name
+    if "description" in fields:
+        kwargs["description"] = request.description
+    if "address" in fields:
+        kwargs["address"] = request.address
+
+    try:
+        await update_entity(
+            db, str(current_user.id), str(entity_id), **kwargs
+        )
+    except ValueError as error:
+        detail = str(error)
+        code = (
+            status.HTTP_404_NOT_FOUND
+            if "not found" in detail
+            else status.HTTP_409_CONFLICT
+            if "already has that name" in detail
+            else status.HTTP_400_BAD_REQUEST
+        )
+        raise HTTPException(status_code=code, detail=detail)
+
+    detail = await get_entity_detail(
+        db, str(current_user.id), str(entity_id), unlocked_ids
+    )
+    if detail is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Entity not found"
+        )
+    return await _entity_detail_response(db, str(current_user.id), detail)
+
+
 @router.get(
     "/entities/{entity_id}",
     response_model=EntityDetail,
@@ -454,6 +510,15 @@ async def get_entity(
             detail="Entity not found",
         )
 
+    return await _entity_detail_response(db, str(current_user.id), detail)
+
+
+async def _entity_detail_response(
+    db: AsyncSession,
+    user_id: str,
+    detail: tuple[Entity, int, list[str], list[tuple[MemoryEntity, Memory]]],
+) -> EntityDetail:
+    """Assemble an entity's full card: spellings, memories and found facts."""
     entity, visible_count, aliases, rows = detail
 
     memories = []
@@ -479,7 +544,7 @@ async def get_entity(
     fact_rows = await db.execute(
         select(EntityFact)
         .where(EntityFact.entity_id == entity.id)
-        .where(EntityFact.user_id == current_user.id)
+        .where(EntityFact.user_id == user_id)
         .order_by(EntityFact.fetched_at.desc())
     )
     facts = [

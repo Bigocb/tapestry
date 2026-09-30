@@ -1,5 +1,10 @@
 """Entity resolution: turning mentions into canonical entities.
 
+This module also owns the hand edits: a rename, a description, an address. The
+guards there are the same ones the automatic path uses — an alias must resolve
+to exactly one entity, and the matching key must stay in step with the name.
+
+
 The model separates three things:
 - ``Entity``       the real person/place/organization (one row, forever)
 - ``EntityAlias``  every way its name has been written
@@ -60,6 +65,131 @@ def normalize_name(value: str) -> str:
         text = text[:-2]
 
     return text.strip(_EDGE_PUNCTUATION).strip()
+
+
+# What a hand edit can change, and the sentinel that says "leave this alone".
+# ``None`` is a real value here (it clears a description), so it cannot mean
+# "omitted" — the sentinel does.
+_UNSET = object()
+
+
+async def update_entity(
+    db: AsyncSession,
+    user_id: str,
+    entity_id: str,
+    *,
+    canonical_name=_UNSET,
+    description=_UNSET,
+    address=_UNSET,
+) -> Entity:
+    """Edit an entity's name, description or address by hand.
+
+    Correcting the name is the point: extraction guesses a place's name from one
+    person's memory of it, and the user is the authority on what it is called
+    and where it is.
+
+    Renaming keeps the old spelling as an alias, so the memories still carrying
+    it resolve here rather than forking a second entity. It refuses a name
+    already owned by another live entity of the same kind — that is a merge, and
+    a merge is reversible where this is not.
+    """
+    entity = await _load_owned_entity(db, user_id, entity_id)
+    if entity is None or entity.merged_into_id is not None:
+        raise ValueError("Entity not found")
+
+    if canonical_name is not _UNSET:
+        cleaned = (canonical_name or "").strip()[:255]
+        if not cleaned:
+            raise ValueError("A name is required")
+        if normalize_name(cleaned) != entity.normalized_name:
+            await _ensure_name_is_free(db, user_id, entity, cleaned)
+            old_name = entity.canonical_name
+            await _drop_alias(db, user_id, entity, old_name)
+            entity.canonical_name = cleaned
+            entity.normalized_name = normalize_name(cleaned)
+            await _record_alias(db, user_id, entity, old_name, source="user")
+
+    if description is not _UNSET:
+        entity.description = (description.strip() or None) if description else None
+
+    if address is not _UNSET:
+        if address is not None and entity.kind != "place":
+            raise ValueError("An address belongs to a place")
+        clean_address = (address or "").strip()
+        attributes = dict(entity.attributes or {})
+        if clean_address:
+            attributes["address"] = clean_address
+        else:
+            attributes.pop("address", None)
+        # Reassign rather than mutate: a JSON column only marks itself dirty on
+        # assignment, so an in-place edit would never be saved.
+        entity.attributes = attributes
+
+    await db.commit()
+    await db.refresh(entity)
+    return entity
+
+
+async def _ensure_name_is_free(
+    db: AsyncSession, user_id: str, entity: Entity, name: str
+) -> None:
+    """Refuse a name another live entity of this kind already answers to."""
+    taken = await find_entity_by_alias(
+        db, user_id, entity.kind, normalize_name(name)
+    )
+    if taken is not None and str(taken.id) != str(entity.id):
+        raise ValueError("Another entity already has that name")
+
+
+async def _drop_alias(
+    db: AsyncSession, user_id: str, entity: Entity, alias: str
+) -> None:
+    """Remove one spelling, freeing its matching key.
+
+    Flushed immediately: the same key is re-added by ``_record_alias`` below,
+    and with autoflush off the insert would otherwise race the delete and trip
+    the unique index.
+    """
+    result = await db.execute(
+        select(EntityAlias)
+        .where(EntityAlias.user_id == user_id)
+        .where(EntityAlias.entity_id == entity.id)
+        .where(EntityAlias.normalized_alias == normalize_name(alias))
+    )
+    for row in result.scalars().all():
+        await db.delete(row)
+    await db.flush()
+
+
+async def _record_alias(
+    db: AsyncSession,
+    user_id: str,
+    entity: Entity,
+    alias: str,
+    source: str = "user",
+) -> None:
+    """Keep a spelling for this entity, if it is not already kept."""
+    normalized = normalize_name(alias)
+    if not normalized:
+        return
+    existing = await db.execute(
+        select(EntityAlias)
+        .where(EntityAlias.user_id == user_id)
+        .where(EntityAlias.entity_id == entity.id)
+        .where(EntityAlias.normalized_alias == normalized)
+    )
+    if existing.scalars().first() is not None:
+        return
+    db.add(
+        EntityAlias(
+            user_id=user_id,
+            entity_id=entity.id,
+            alias=alias.strip()[:255],
+            normalized_alias=normalized,
+            kind=entity.kind,
+            source=source,
+        )
+    )
 
 
 async def find_entity_by_alias(

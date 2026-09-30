@@ -517,6 +517,22 @@ class EntityFactResponse(BaseModel):
         from_attributes = True
 
 
+class EntityUpdateRequest(BaseModel):
+    """A hand edit of an entity's card.
+
+    Every field is optional: omitted means "leave it", present means "set it".
+    A present ``null`` clears the field, which is why these use ``model_fields_set``
+    rather than a truthiness check. The address lives in ``attributes`` but is
+    edited as its own field so the UI never has to know that.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    canonical_name: Optional[str] = Field(None, max_length=255)
+    description: Optional[str] = Field(None, max_length=2000)
+    address: Optional[str] = Field(None, max_length=500)
+
+
 class EntityDetail(EntitySummary):
     """Full entity, including every spelling and the memories mentioning it."""
 
