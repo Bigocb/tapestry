@@ -2,17 +2,17 @@
 
 > **Status snapshot** — last reconciled 2026-09-29 against `master` @ `4cb7df2`.
 >
-> **Done (verified by code + tests):** Issues 2, 3, 4, 5, 6, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 40
+> **Done (verified by code + tests):** Issues 2, 3, 4, 5, 6, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 40
 > **Partial:** Issue 1 (Postgres is now provisioned, but **the pgvector extension is not installed** — the database has only `plpgsql`; the schema, indexes and cross-DB type decorators are in place), Issue 7 (embeddings work via Ollama with a deterministic local fallback; **similarity is still computed in Python** — no ANN index, because pgvector is absent)
 > **Superseded:** Issue 27 — the deployment target changed. MEMIND runs in Docker Compose with Postgres on the homelab box, published through Traefik and cloudflared at `memory.cloutier.work`. The service is live; the Render-specific acceptance criteria no longer apply.
-> **Phases 9 (Tellings), 10 (Account Recovery) and 13 (Entity Management) are complete.** Outstanding: **Issue 38** (real-world enrichment — the lookup is built, storage and UI are not), **Issue 39** (the timeline revisit, still only an idea), and Phase 11's remaining half.
+> **Phases 9 (Tellings), 10 (Account Recovery), 11 (Real-World Enrichment) and 13 (Entity Management) are complete.** Only **Issue 39** remains — the timeline revisit, and it is still only an idea.
 >
 > **Key deviations from original plan:**
 > - **Storage:** production runs on Postgres 16 in Docker on the homelab box. SQLite (`memind.db`) remains the local-dev default.
 > - **Search:** full-text + semantic ranking done in Python over fetched rows, not Postgres `tsquery`/pgvector ANN.
 > - **Agents:** Ollama Cloud (`ollama.com/v1`, `gemma4:31b`) is primary. Story generation implements a Claude Opus fallback (`ANTHROPIC_API_KEY`), gated on a response-quality check; capture/refinement/enrichment are Ollama-only.
 > - **Transcription:** local `faster-whisper`; Issue 4's backend is wired. A 501 is still returned when the model or its dependency is genuinely unavailable — that is error handling, not the old stub.
-> - **Tests:** 464 backend passing, 1 skipped (the pgvector extension check) on in-memory SQLite, plus 41 frontend tests via vitest/jsdom.
+> - **Tests:** 470 backend passing, 1 skipped (the pgvector extension check) on in-memory SQLite, plus 44 frontend tests via vitest/jsdom.
 > - **Beyond the plan:** first-class entities, the privacy lock, the review queue and fuzzy dates all shipped outside the numbered issues, so this list understates the delivered surface.
 >
 > **Remaining work:** the pgvector half of Issue 1 (and the ANN search it would unblock in Issue 7), Phase 9 (Tellings, Issues 28–35), and active iteration on capture/parsing quality (Issues 4–6 area).
@@ -1482,23 +1482,45 @@ match is right is the same thing that makes a wrong match visible.
 
 #### Acceptance criteria
 
-- [ ] A place entity can be looked up on demand
-- [ ] The match records its source, its source id, and when it was fetched
-- [ ] What was matched is shown — label and description — so a wrong match is
+- [x] A place entity can be looked up on demand
+- [x] The match records its source, its source id, and when it was fetched
+- [x] What was matched is shown — label and description — so a wrong match is
       visible rather than silent
-- [ ] A lookup that finds nothing stores nothing and says so
-- [ ] Facts are stored separately from the user's own data and rendered
+- [x] A lookup that finds nothing stores nothing and says so
+- [x] Facts are stored separately from the user's own data and rendered
       distinctly from it
-- [ ] A fact can be discarded
-- [ ] People are never looked up
+- [x] A fact can be discarded
+- [x] People are never looked up
+
+> **Status: DONE.** Facts live in their own table, never in
+> `entities.attributes`, and render in their own panel saying "looked up, not
+> remembered". That is a structural guarantee rather than a matter of wording,
+> which is the only kind worth having on a platform whose value is that the
+> memories are yours.
+>
+> Candidates rather than the first hit, and the prompt was right to ask for it.
+> Checked against the live API through the app's own code: **"Raleigh" returns
+> a city, a family name and an Australian electorate**; "Bluebird Cafe" a
+> Nashville music club and a Californian restaurant.
+>
+> **The motivating example only half works.** "Mission Valley Cinemas" resolves
+> to Q43096397, a movie theater in Raleigh — but **"Mission Valley Theater"
+> finds nothing**, because Wikidata's label differs by one word. So the lookup
+> is sound and the name has to be near Wikidata's. Worth knowing before
+> concluding the feature is broken: it is the matching that is narrow, not the
+> lookup.
+>
+> People are refused with a 400 rather than an empty list, so the refusal is
+> visible rather than looking like "nothing found".
 
 #### Explicitly deferred
 
 - Automatic lookup on entity creation.
-- Overpass/OSM, and merging sources.
-- Choosing between candidates: the first slice takes the best match and shows
-  it. Letting the user pick from the candidates is the natural follow-up, and
-  the search already returns them.
+- Overpass/OSM as a second source, and merging sources.
+- Fuzzy name matching, which is what would rescue "Theater" for "Cinemas".
+  Noted because it is the actual limitation met in practice, not a hypothetical.
+- Fetching the entity's claims — founded, dissolved, located in — into
+  `entity_facts.data`, which the column already has room for.
 
 ---
 
