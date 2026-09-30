@@ -1140,6 +1140,13 @@ split was simply wrong.
 Re-splitting a draft replaces its segments. Re-splitting a committed telling
 produces a new draft and leaves the already-committed memories untouched.
 
+The review screen is the place this has to be reachable from. Rejecting
+segments is how a user says "this split is wrong", and the loop it should lead
+into is *edit the transcript, re-run, review again* — not manually merging,
+splitting and deleting segment by segment to reconstruct the account by hand.
+When every proposed segment has been rejected, the screen should say plainly
+that there is nothing left to commit and offer the way back to the transcript.
+
 #### Acceptance criteria
 
 - [ ] A telling's transcript can be edited
@@ -1148,6 +1155,10 @@ produces a new draft and leaves the already-committed memories untouched.
 - [ ] The user is warned before a re-split discards the current draft
 - [ ] After a re-split the user can see what changed: which segments are new,
       which are gone, and which survived with edits
+- [ ] The transcript can be edited and re-split from the review screen, without
+      leaving it
+- [ ] Rejecting every segment leaves the user on a clear path to edit the
+      transcript and re-run, rather than stuck on an empty draft
 
 ---
 
