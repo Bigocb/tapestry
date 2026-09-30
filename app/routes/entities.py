@@ -12,9 +12,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Optional
 from uuid import UUID
 
-from app.db import MemoryEntity, get_db, User
+from app.db import EntityFact, MemoryEntity, get_db, User
 from app.db.entities import (
     FIRST_CLASS_KINDS,
+    _load_owned_entity,
     count_entities_by_kind,
     get_entity_detail,
     list_entities,
@@ -24,9 +25,12 @@ from app.db.entities import (
     undo_merge,
     undo_split,
 )
+from app.lookup import search_places
 from app.dependencies import get_current_user
 from app.models.schemas import (
     EntityDetail,
+    EntityFactRequest,
+    EntityFactResponse,
     EntityListResponse,
     EntityMemoryRef,
     EntityMergeRequest,
@@ -35,6 +39,7 @@ from app.models.schemas import (
     EntitySplitRequest,
     EntitySplitResponse,
     EntitySummary,
+    LookupCandidate,
 )
 from app.privacy import get_unlocked_memory_ids
 
@@ -288,6 +293,141 @@ async def undo_split_endpoint(
 
 
 @router.get(
+    "/entities/{entity_id}/lookup",
+    response_model=list[LookupCandidate],
+    summary="Look a place up outside the app",
+    description="Candidate matches for this place's name. Nothing is stored.",
+)
+async def lookup_entity(
+    entity_id: UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[LookupCandidate]:
+    """Offer candidates for the user to choose between.
+
+    Several, not one: a name like "Raleigh" matches a city, a family name and
+    an Australian electorate. Choosing is the user's job, and the label and
+    description are what make that choice possible.
+    """
+    entity = await _load_owned_entity(db, str(current_user.id), str(entity_id))
+    if entity is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Entity not found"
+        )
+
+    # People are never looked up. Resolving a first name to a real individual
+    # is unreliable and invasive, and being helpfully wrong about a friend is
+    # worse than saying nothing.
+    if entity.kind != "place":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "Only places can be looked up. A person's name is not enough "
+                "to identify a real individual reliably."
+            ),
+        )
+
+    return [
+        LookupCandidate(
+            source=match.source,
+            source_id=match.source_id,
+            label=match.label,
+            description=match.description,
+            url=match.url,
+        )
+        for match in await search_places(entity.canonical_name)
+    ]
+
+
+@router.post(
+    "/entities/{entity_id}/facts",
+    response_model=EntityFactResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Keep a looked-up fact",
+    description="Store a fact found outside the app, with where it came from.",
+)
+async def keep_fact(
+    entity_id: UUID,
+    request: EntityFactRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> EntityFactResponse:
+    """Keep a candidate the user chose.
+
+    Stored apart from the entity's own attributes, so it can never be mistaken
+    for something the user said.
+    """
+    entity = await _load_owned_entity(db, str(current_user.id), str(entity_id))
+    if entity is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Entity not found"
+        )
+
+    fact = EntityFact(
+        user_id=current_user.id,
+        entity_id=entity.id,
+        source=request.source,
+        source_id=request.source_id,
+        label=request.label,
+        description=request.description,
+        source_url=request.url,
+    )
+    db.add(fact)
+    await db.commit()
+    await db.refresh(fact)
+
+    return EntityFactResponse(
+        id=fact.id,
+        source=fact.source,
+        source_id=fact.source_id,
+        label=fact.label,
+        description=fact.description,
+        url=fact.source_url,
+        fetched_at=fact.fetched_at,
+    )
+
+
+@router.delete(
+    "/entities/{entity_id}/facts/{fact_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Discard a kept fact",
+    description="Throw away a fact that turned out to be the wrong match.",
+)
+async def discard_fact(
+    entity_id: UUID,
+    fact_id: UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    """Forget a fact found about this entity."""
+    entity = await _load_owned_entity(db, str(current_user.id), str(entity_id))
+    if entity is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Entity not found"
+        )
+
+    fact = (
+        (
+            await db.execute(
+                select(EntityFact)
+                .where(EntityFact.id == fact_id)
+                .where(EntityFact.entity_id == entity.id)
+                .where(EntityFact.user_id == current_user.id)
+            )
+        )
+        .scalars()
+        .first()
+    )
+    if fact is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Fact not found"
+        )
+
+    await db.delete(fact)
+    await db.commit()
+
+
+@router.get(
     "/entities/{entity_id}",
     response_model=EntityDetail,
     summary="Get an entity",
@@ -336,9 +476,29 @@ async def get_entity(
             )
         )
 
+    fact_rows = await db.execute(
+        select(EntityFact)
+        .where(EntityFact.entity_id == entity.id)
+        .where(EntityFact.user_id == current_user.id)
+        .order_by(EntityFact.fetched_at.desc())
+    )
+    facts = [
+        EntityFactResponse(
+            id=fact.id,
+            source=fact.source,
+            source_id=fact.source_id,
+            label=fact.label,
+            description=fact.description,
+            url=fact.source_url,
+            fetched_at=fact.fetched_at,
+        )
+        for fact in fact_rows.scalars().all()
+    ]
+
     summary = _summary(entity, visible_count)
     return EntityDetail(
         **summary.model_dump(),
         aliases=aliases,
         memories=memories,
+        facts=facts,
     )

@@ -400,6 +400,40 @@ class JobStatus(Base):
     )
 
 
+class EntityFact(Base):
+    """A fact found outside the app, held apart from what the user said.
+
+    Deliberately its own table rather than entries in ``entities.attributes``.
+    A looked-up fact must never be mistaken for the user's own recollection, and
+    the way to guarantee that is to keep it somewhere else, labelled with where
+    it came from and when it was fetched.
+    """
+
+    __tablename__ = "entity_facts"
+
+    id = Column(GUID(), primary_key=True, default=uuid.uuid4)
+    user_id = Column(GUID(), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    entity_id = Column(
+        GUID(), ForeignKey("entities.id", ondelete="CASCADE"), nullable=False
+    )
+
+    source = Column(String(50), nullable=False)  # "wikidata"
+    source_id = Column(String(100), nullable=False)  # "Q43096397"
+    label = Column(String(255), nullable=False)
+    description = Column(Text, nullable=True)
+    source_url = Column(String(500), nullable=True)
+    # Room for an entity's claims later without a migration.
+    data = Column(DBJSON(), nullable=True)
+
+    fetched_at = Column(TIMESTAMP, server_default=func.now(), nullable=False)
+    created_at = Column(TIMESTAMP, server_default=func.now(), nullable=False)
+
+    __table_args__ = (
+        Index("idx_entity_facts_entity", "entity_id"),
+        Index("idx_entity_facts_user", "user_id"),
+    )
+
+
 class PasswordResetToken(Base):
     """A single-use, short-lived token for choosing a new password.
 

@@ -480,11 +480,51 @@ class EntityMemoryRef(BaseModel):
     created_at: datetime
 
 
+class LookupCandidate(BaseModel):
+    """A possible match found outside the app. Returning it stores nothing."""
+
+    source: str
+    source_id: str
+    label: str
+    description: Optional[str] = None
+    url: str
+
+
+class EntityFactRequest(BaseModel):
+    """A candidate the user chose to keep, as the lookup returned it."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    source: str = Field(..., min_length=1, max_length=50)
+    source_id: str = Field(..., min_length=1, max_length=100)
+    label: str = Field(..., min_length=1, max_length=255)
+    description: Optional[str] = None
+    url: Optional[str] = Field(None, max_length=500)
+
+
+class EntityFactResponse(BaseModel):
+    """A kept fact, carrying where it came from and when it was fetched."""
+
+    id: UUID
+    source: str
+    source_id: str
+    label: str
+    description: Optional[str] = None
+    url: Optional[str] = None
+    fetched_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
 class EntityDetail(EntitySummary):
     """Full entity, including every spelling and the memories mentioning it."""
 
     aliases: List[str] = Field(default_factory=list)
     memories: List[EntityMemoryRef] = Field(default_factory=list)
+    # Kept separately from everything else, and rendered that way too: these are
+    # facts found outside the app, not things the user said.
+    facts: List[EntityFactResponse] = Field(default_factory=list)
 
 
 class EntityMergeRequest(BaseModel):

@@ -186,6 +186,24 @@ export interface TellingSegmentUpdate {
   date_label?: string | null;
 }
 
+export interface LookupCandidate {
+  source: string;
+  source_id: string;
+  label: string;
+  description?: string | null;
+  url: string;
+}
+
+export interface EntityFact {
+  id: string;
+  source: string;
+  source_id: string;
+  label: string;
+  description?: string | null;
+  url?: string | null;
+  fetched_at: string;
+}
+
 export interface TellingSummary {
   id: string;
   status: string;
@@ -353,6 +371,23 @@ export const api = {
       new_entity_id: string;
       moved_mention_count: number;
     }>,
+  // Looked-up facts. Held apart from the entity's own data on the server, and
+  // rendered apart on the screen, so a fact found outside is never mistaken
+  // for something the user said.
+  lookupEntity: (id: string) =>
+    request("GET", `/entities/${id}/lookup`) as Promise<LookupCandidate[]>,
+  keepEntityFact: (
+    id: string,
+    fact: {
+      source: string;
+      source_id: string;
+      label: string;
+      description?: string | null;
+      url?: string | null;
+    }
+  ) => request("POST", `/entities/${id}/facts`, fact) as Promise<EntityFact>,
+  discardEntityFact: (id: string, factId: string) =>
+    request("DELETE", `/entities/${id}/facts/${factId}`),
   undoEntitySplit: (splitId: string) =>
     request("POST", `/entities/split/${splitId}/undo`, {}) as Promise<{
       detail: string;

@@ -26,6 +26,26 @@ interface EntityDetail {
   last_seen_at?: string;
   aliases: string[];
   memories: EntityMemoryRef[];
+  // Optional: an entity fetched before facts existed has no such field.
+  facts?: EntityFact[];
+}
+
+interface EntityFact {
+  id: string;
+  source: string;
+  source_id: string;
+  label: string;
+  description?: string | null;
+  url?: string | null;
+  fetched_at: string;
+}
+
+interface LookupCandidate {
+  source: string;
+  source_id: string;
+  label: string;
+  description?: string | null;
+  url: string;
 }
 
 interface EntitySummaryBase {
@@ -68,6 +88,57 @@ export function EntityDetailView({ id }: { id: string }) {
   const [notice, setNotice] = useState("");
   const [candidates, setCandidates] = useState<EntitySummaryBase[]>([]);
   const [target, setTarget] = useState("");
+  const [found, setFound] = useState<LookupCandidate[]>([]);
+  const [lookingUp, setLookingUp] = useState(false);
+  const [lookedUp, setLookedUp] = useState(false);
+
+  const lookUp = async () => {
+    if (!entity) return;
+    setLookingUp(true);
+    try {
+      setFound(await api.lookupEntity(entity.id));
+      setLookedUp(true);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Lookup failed");
+    } finally {
+      setLookingUp(false);
+    }
+  };
+
+  const keep = async (candidate: LookupCandidate) => {
+    if (!entity) return;
+    setBusy(true);
+    try {
+      await api.keepEntityFact(entity.id, {
+        source: candidate.source,
+        source_id: candidate.source_id,
+        label: candidate.label,
+        description: candidate.description ?? null,
+        url: candidate.url,
+      });
+      setFound([]);
+      setLookedUp(false);
+      await load();
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Could not keep that");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const discard = async (factId: string) => {
+    if (!entity) return;
+    setBusy(true);
+    try {
+      await api.discardEntityFact(entity.id, factId);
+      await load();
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Could not discard that");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const [moving, setMoving] = useState<Set<string>>(new Set());
   const [newName, setNewName] = useState("");
   const [lastSplit, setLastSplit] = useState<string | null>(null);
@@ -306,6 +377,105 @@ export function EntityDetailView({ id }: { id: string }) {
               </span>
             ))}
           </div>
+        </section>
+      )}
+
+      {(entity.facts ?? []).length > 0 && (
+        <section className="border border-sky-200 bg-sky-50 rounded p-4">
+          <h2 className="font-semibold mb-1">Found elsewhere</h2>
+          <ul className="space-y-3">
+            {(entity.facts ?? []).map((fact) => (
+              <li key={fact.id} className="text-sm">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="font-medium">{fact.label}</p>
+                    {fact.description && (
+                      <p className="text-gray-700">{fact.description}</p>
+                    )}
+                    <p className="text-xs text-sky-800 mt-1">
+                      from {fact.source}
+                      {fact.url ? (
+                        <>
+                          {" · "}
+                          <a
+                            href={fact.url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="underline"
+                          >
+                            {fact.source_id}
+                          </a>
+                        </>
+                      ) : null}
+                      {" · fetched "}
+                      {new Date(fact.fetched_at).toLocaleDateString()}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => discard(fact.id)}
+                    disabled={busy}
+                    className="text-xs text-gray-600 underline shrink-0 disabled:opacity-50"
+                  >
+                    Discard
+                  </button>
+                </div>
+              </li>
+            ))}
+          </ul>
+          <p className="text-xs text-sky-800 mt-3">
+            Looked up, not remembered — {entity.canonical_name} never told us
+            this.
+          </p>
+        </section>
+      )}
+
+      {entity.kind === "place" && (
+        <section className="border rounded p-4">
+          <h2 className="font-semibold mb-1">Look this place up</h2>
+          <p className="text-sm text-gray-600 mb-2">
+            Searches Wikidata by name. Nothing is kept until you choose it.
+          </p>
+          <button
+            type="button"
+            onClick={lookUp}
+            disabled={lookingUp || busy}
+            className="border px-4 py-2 rounded hover:bg-gray-50 disabled:opacity-50"
+          >
+            {lookingUp ? "Looking…" : "Look this up"}
+          </button>
+
+          {lookedUp && found.length === 0 && (
+            <p className="text-sm text-gray-600 mt-3">
+              Nothing found under that name.
+            </p>
+          )}
+
+          {found.length > 0 && (
+            <ul className="mt-3 space-y-2">
+              {found.map((candidate) => (
+                <li
+                  key={`${candidate.source}-${candidate.source_id}`}
+                  className="flex items-start justify-between gap-3 text-sm border rounded p-3"
+                >
+                  <div>
+                    <p className="font-medium">{candidate.label}</p>
+                    {candidate.description && (
+                      <p className="text-gray-700">{candidate.description}</p>
+                    )}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => keep(candidate)}
+                    disabled={busy}
+                    className="bg-indigo-600 text-white px-3 py-1 rounded hover:bg-indigo-700 disabled:opacity-50 shrink-0"
+                  >
+                    Keep this
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
         </section>
       )}
 

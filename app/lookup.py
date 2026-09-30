@@ -80,20 +80,29 @@ def _to_match(candidate: dict) -> Optional[PlaceMatch]:
     )
 
 
-async def find_place(name: str) -> Optional[PlaceMatch]:
-    """The best match for a place's name, or None if there is none.
+async def search_places(name: str, limit: int = 3) -> list[PlaceMatch]:
+    """Candidate places matching a name, best first.
 
-    The first usable result, deliberately. The caller shows what was matched —
-    label and description alike — so a wrong match is visible rather than
-    silent, which is the honest way to start before letting the user choose
-    between candidates.
+    Several, not one. "Raleigh" returns a city, a family name and an Australian
+    electorate; "Bluebird Cafe" returns a Nashville music club and a Californian
+    restaurant. Choosing between them is the user's job, and the label and
+    description are what make that choice possible.
     """
     if not name or not name.strip():
-        return None
+        return []
 
-    for candidate in await _search(name.strip(), SEARCH_LIMIT):
+    matches: list[PlaceMatch] = []
+    for candidate in await _search(name.strip(), max(limit, SEARCH_LIMIT)):
         match = _to_match(candidate)
         if match is not None:
-            return match
+            matches.append(match)
+        if len(matches) >= limit:
+            break
 
-    return None
+    return matches
+
+
+async def find_place(name: str) -> Optional[PlaceMatch]:
+    """The single best match for a place's name, or None if there is none."""
+    matches = await search_places(name, limit=1)
+    return matches[0] if matches else None

@@ -14,6 +14,9 @@ vi.mock("@/lib/api", () => ({
     undoEntityMerge: vi.fn(),
     splitEntity: vi.fn(),
     undoEntitySplit: vi.fn(),
+    lookupEntity: vi.fn(),
+    keepEntityFact: vi.fn(),
+    discardEntityFact: vi.fn(),
   },
 }));
 
@@ -45,6 +48,85 @@ const DAVE_SMITH = {
   canonical_name: "Dave Smith",
   mention_count: 1,
 };
+
+const THEATRE = {
+  id: "e5",
+  kind: "place",
+  canonical_name: "Mission Valley Theater",
+  mention_count: 1,
+  aliases: ["mission valley theater"],
+  memories: [],
+  facts: [],
+};
+
+const CANDIDATE = {
+  source: "wikidata",
+  source_id: "Q43096397",
+  label: "Mission Valley Cinemas",
+  description: "movie theater in Raleigh, North Carolina",
+  url: "http://www.wikidata.org/entity/Q43096397",
+};
+
+describe("EntityDetailView lookup", () => {
+  beforeEach(() => {
+    vi.mocked(api.getEntity).mockResolvedValue(THEATRE);
+    vi.mocked(api.getMergeSuggestions).mockResolvedValue([]);
+    vi.mocked(api.getEntities).mockResolvedValue({
+      items: [THEATRE],
+      total: 1,
+      limit: 200,
+      offset: 0,
+    });
+  });
+
+  it("keeps the candidate you choose, not the first one offered", async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.lookupEntity).mockResolvedValue([
+      CANDIDATE,
+      { ...CANDIDATE, source_id: "Q999", label: "Somewhere else" },
+    ]);
+    vi.mocked(api.keepEntityFact).mockResolvedValue({
+      id: "f1",
+      ...CANDIDATE,
+      fetched_at: "2026-01-01T00:00:00",
+    });
+
+    render(<EntityDetailView id="e5" />);
+
+    await user.click(
+      await screen.findByRole("button", { name: /look this up/i })
+    );
+
+    // Both are shown, because "Raleigh" matches three different things.
+    expect(await screen.findByText("Mission Valley Cinemas")).toBeInTheDocument();
+    expect(screen.getByText("Somewhere else")).toBeInTheDocument();
+
+    const keeps = screen.getAllByRole("button", { name: /keep this/i });
+    await user.click(keeps[1]);
+
+    expect(api.keepEntityFact).toHaveBeenCalledWith("e5", {
+      source: "wikidata",
+      source_id: "Q999",
+      label: "Somewhere else",
+      description: CANDIDATE.description,
+      url: CANDIDATE.url,
+    });
+  });
+
+  it("says so when nothing is found", async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.lookupEntity).mockResolvedValue([]);
+
+    render(<EntityDetailView id="e5" />);
+    await user.click(
+      await screen.findByRole("button", { name: /look this up/i })
+    );
+
+    expect(
+      await screen.findByText(/nothing found under that name/i)
+    ).toBeInTheDocument();
+  });
+});
 
 describe("EntityDetailView manual merge", () => {
   beforeEach(() => {
@@ -94,6 +176,16 @@ describe("EntityDetailView manual merge", () => {
       name: "Dave Smith",
       memory_ids: ["m1"],
     });
+  });
+
+  it("offers no lookup on a person", async () => {
+    render(<EntityDetailView id="e1" />);
+
+    await screen.findByText("Dave");
+    // Resolving a first name to a real individual is unreliable and invasive.
+    expect(
+      screen.queryByRole("button", { name: /look this up/i })
+    ).not.toBeInTheDocument();
   });
 
   it("never offers the entity itself as a merge target", async () => {
