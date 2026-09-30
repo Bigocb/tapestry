@@ -2,17 +2,17 @@
 
 > **Status snapshot** — last reconciled 2026-09-29 against `master` @ `4cb7df2`.
 >
-> **Done (verified by code + tests):** Issues 2, 3, 4, 5, 6, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 28, 29, 30, 31
+> **Done (verified by code + tests):** Issues 2, 3, 4, 5, 6, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 28, 29, 30, 31, 32, 33
 > **Partial:** Issue 1 (Postgres is now provisioned, but **the pgvector extension is not installed** — the database has only `plpgsql`; the schema, indexes and cross-DB type decorators are in place), Issue 7 (embeddings work via Ollama with a deterministic local fallback; **similarity is still computed in Python** — no ANN index, because pgvector is absent)
 > **Superseded:** Issue 27 — the deployment target changed. MEMIND runs in Docker Compose with Postgres on the homelab box, published through Traefik and cloudflared at `memory.cloutier.work`. The service is live; the Render-specific acceptance criteria no longer apply.
-> **Not started:** Phase 9, Issues 32–36 (Tellings). Issues 28–31 are done, deployed and verified: the tracer bullet, segmentation, the date cursor, and the telling's own frame.
+> **Not started:** Phase 9, Issues 34–36 (Tellings). Issues 28–33 are done, deployed and verified: the tracer bullet, segmentation, the date cursor, the telling's frame, reshaping the split, and undoing a commit.
 >
 > **Key deviations from original plan:**
 > - **Storage:** production runs on Postgres 16 in Docker on the homelab box. SQLite (`memind.db`) remains the local-dev default.
 > - **Search:** full-text + semantic ranking done in Python over fetched rows, not Postgres `tsquery`/pgvector ANN.
 > - **Agents:** Ollama Cloud (`ollama.com/v1`, `gemma4:31b`) is primary. Story generation implements a Claude Opus fallback (`ANTHROPIC_API_KEY`), gated on a response-quality check; capture/refinement/enrichment are Ollama-only.
 > - **Transcription:** local `faster-whisper`; Issue 4's backend is wired. A 501 is still returned when the model or its dependency is genuinely unavailable — that is error handling, not the old stub.
-> - **Tests:** 427 backend passing, 1 skipped (the pgvector extension check) on in-memory SQLite, plus 22 frontend tests via vitest/jsdom.
+> - **Tests:** 435 backend passing, 1 skipped (the pgvector extension check) on in-memory SQLite, plus 27 frontend tests via vitest/jsdom.
 > - **Beyond the plan:** first-class entities, the privacy lock, the review queue and fuzzy dates all shipped outside the numbered issues, so this list understates the delivered surface.
 >
 > **Remaining work:** the pgvector half of Issue 1 (and the ANN search it would unblock in Issue 7), Phase 9 (Tellings, Issues 28–35), and active iteration on capture/parsing quality (Issues 4–6 area).
@@ -1146,12 +1146,29 @@ commit.
 
 #### Acceptance criteria
 
-- [ ] Two adjacent segments can be merged into one
-- [ ] A segment can be split into two
-- [ ] A segment can be deleted from the draft
-- [ ] Segments can be reordered
-- [ ] Ordinals remain consistent after every structural edit
-- [ ] Each edit is reflected in the review screen without a full reload
+- [x] Two adjacent segments can be merged into one
+- [x] A segment can be split into two
+- [x] A segment can be deleted from the draft
+- [x] Segments can be reordered
+- [x] Ordinals remain consistent after every structural edit
+- [x] Each edit is reflected in the review screen without a full reload
+
+> **Status: DONE.** Each operation is its own endpoint rather than one generic
+> "update segments" call, so the intent is legible in the API.
+>
+> Two decisions worth keeping: merging keeps the *first* segment's structured
+> content and splitting leaves the new half blank, both because the text has
+> changed and carrying the old title or date over would describe words the
+> segment no longer contains. Re-deriving it would mean another model call,
+> which is not what a structural edit should cost.
+>
+> Structural edits are refused with 409 once a telling is committed — its
+> segments are memories by then, so moving their boundaries would orphan them.
+> Issue 33's undo, or Issue 34's re-split, are the routes out of that state.
+>
+> A bug found on the way: re-querying a telling returned the identity-mapped
+> object whose segment collection was whatever loaded last, so a merge looked
+> like it had done nothing. `_load_telling` now forces a rebuild from the rows.
 
 ---
 
@@ -1169,11 +1186,28 @@ and its transcript survive, so it can be re-split afterwards.
 
 #### Acceptance criteria
 
-- [ ] Every committed memory links to the telling that produced it
-- [ ] All memories from one telling can be listed
-- [ ] The whole batch can be deleted in one action
-- [ ] Deleting the batch does not delete the telling or its transcript
-- [ ] A memory from a telling can be marked private like any other
+- [x] Every committed memory links to the telling that produced it
+- [x] All memories from one telling can be listed
+- [x] The whole batch can be deleted in one action
+- [x] Deleting the batch does not delete the telling or its transcript
+- [x] A memory from a telling can be marked private like any other
+
+> **Status: DONE.** The link the schema already had (`telling_segments.memory_id`,
+> set by `commit_telling` since Issue 28) is now usable rather than merely
+> recorded.
+>
+> Deleting the batch clears the links and returns the telling to `draft`, so a
+> bad commit is a step back rather than a loss — the transcript and every
+> segment's text and date survive, and the same telling can be committed again.
+> A test commits, deletes and re-commits to prove it.
+>
+> The listing reuses the memories route's own response builder rather than a
+> second one, so a private memory cannot leak through this path. Worth knowing
+> because a second builder is exactly where that rule would get forgotten.
+>
+> Not addressed: deleting memories leaves `entities.mention_count` denormalised
+> upward. Pre-existing — deleting a memory has always had this — but a batch
+> delete makes it easier to notice.
 
 ---
 
