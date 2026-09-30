@@ -1,21 +1,21 @@
 # MEMIND Issues - Vertical Slices
 
-> **Status snapshot** — last reconciled 2026-09-29 against `master` @ `4cb7df2`.
+> **Status snapshot** — last reconciled 2026-09-30 against `main` @ `b086679`.
 >
-> **Done (verified by code + tests):** Issues 2, 3, 4, 5, 6, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 40
+> **Done (verified by code + tests):** Issues 2, 3, 4, 5, 6, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40
 > **Partial:** Issue 1 (Postgres is now provisioned, but **the pgvector extension is not installed** — the database has only `plpgsql`; the schema, indexes and cross-DB type decorators are in place), Issue 7 (embeddings work via Ollama with a deterministic local fallback; **similarity is still computed in Python** — no ANN index, because pgvector is absent)
 > **Superseded:** Issue 27 — the deployment target changed. MEMIND runs in Docker Compose with Postgres on the homelab box, published through Traefik and cloudflared at `memory.cloutier.work`. The service is live; the Render-specific acceptance criteria no longer apply.
-> **Phases 9 (Tellings), 10 (Account Recovery), 11 (Real-World Enrichment) and 13 (Entity Management) are complete.** Only **Issue 39** remains — the timeline revisit, and it is still only an idea.
+> **Phases 9 (Tellings), 10 (Account Recovery), 11 (Real-World Enrichment), 12 (Timeline) and 13 (Entity Management) are complete.** Every numbered issue is done or closed, apart from the two partials above.
 >
 > **Key deviations from original plan:**
 > - **Storage:** production runs on Postgres 16 in Docker on the homelab box. SQLite (`memind.db`) remains the local-dev default.
 > - **Search:** full-text + semantic ranking done in Python over fetched rows, not Postgres `tsquery`/pgvector ANN.
 > - **Agents:** Ollama Cloud (`ollama.com/v1`, `gemma4:31b`) is primary. Story generation implements a Claude Opus fallback (`ANTHROPIC_API_KEY`), gated on a response-quality check; capture/refinement/enrichment are Ollama-only.
 > - **Transcription:** local `faster-whisper`; Issue 4's backend is wired. A 501 is still returned when the model or its dependency is genuinely unavailable — that is error handling, not the old stub.
-> - **Tests:** 470 backend passing, 1 skipped (the pgvector extension check) on in-memory SQLite, plus 44 frontend tests via vitest/jsdom.
+> - **Tests:** 470 backend passing, 1 skipped (the pgvector extension check) on in-memory SQLite, plus 54 frontend tests via vitest/jsdom.
 > - **Beyond the plan:** first-class entities, the privacy lock, the review queue and fuzzy dates all shipped outside the numbered issues, so this list understates the delivered surface.
 >
-> **Remaining work:** the pgvector half of Issue 1 (and the ANN search it would unblock in Issue 7), Phase 9 (Tellings, Issues 28–35), and active iteration on capture/parsing quality (Issues 4–6 area).
+> **Remaining work:** the pgvector half of Issue 1 (and the ANN search it would unblock in Issue 7), active iteration on capture/parsing quality (Issues 4–6 area), and fuzzy name matching for place lookup (the known limitation met in practice).
 
 ---
 
@@ -1531,11 +1531,11 @@ match is right is the same thing that makes a wrong match visible.
 **Type:** AFK
 **Blocked by:** None
 **User stories covered:** new — raised after using the timeline
-**Status:** placeholder. Brainstorm before this becomes work.
+**Status:** DONE.
 
 #### What to build
 
-Not yet specified. The timeline groups memories by label and precision (Issue
+The timeline groups memories by label and precision (Issue
 22, plus the grouping work that made labels case- and whitespace-insensitive),
 which was built to stop one period's memories scattering into a row each.
 
@@ -1578,14 +1578,23 @@ what makes a memory recognisable at a glance and the data is already there.
 
 #### Acceptance criteria
 
-- [ ] `early 1980s`, `late 1980s` and `1980s` group under one heading
-- [ ] The row still shows the memory's own wording
-- [ ] `Middle school (1987-1990)` still groups with `Middle school`
-- [ ] A row shows the people and places it mentions, not a clock time
-- [ ] A year-precision memory is not labelled "Approximate" — only decades,
+- [x] `early 1980s`, `late 1980s` and `1980s` group under one heading
+- [x] The row still shows the memory's own wording
+- [x] `Middle school (1987-1990)` still groups with `Middle school`
+- [x] A row shows the people and places it mentions, not a clock time
+- [x] A year-precision memory is not labelled "Approximate" — only decades,
       ranges and labels are
-- [ ] A long sparse timeline can be navigated by period without scrolling its
+- [x] A long sparse timeline can be navigated by period without scrolling its
       whole length
+
+> **Status: DONE.** `decadeOf()` in `frontend/lib/dates.ts` collapses a
+> qualified period to its base — `early 1980s` and `late 1980s` join `1980s` —
+> so the heading is the decade while the row keeps the original wording. The
+> `12:00 AM` parse default is gone: exact-date rows show the people and places
+> they mention instead, which the data already carried. "Approximate" now
+> applies only to decades, ranges and labels; a bare year is exact. Period
+> jump-links (`#period-<slug>`) navigate the long, sparse scroll without passing
+> every thin year.
 
 ---
 
@@ -1596,7 +1605,7 @@ what makes a memory recognisable at a glance and the data is already there.
 **Type:** AFK
 **Blocked by:** None
 **User stories covered:** new — raised while using People and Places
-**Status:** raised; not started
+**Status:** DONE.
 
 #### What to build
 
@@ -1680,25 +1689,23 @@ the two, since no extractor is ever right about everything.
 ## Summary
 
 **Total Issues:** 40  
-**Vertical slices:** Organized in 8 build phases (Foundation → Infrastructure → Core Processing → Search → Management → Narrative → Timeline → Deployment), plus **Phase 9 (Tellings)** — Issues 28-36, cut as tracer bullets. Note also that the deployment target is no longer Render: MEMIND now runs on the homelab box behind Traefik and cloudflared at `memory.cloutier.work`, with Postgres.
+**Vertical slices:** Organized in 8 build phases (Foundation → Infrastructure → Core Processing → Search → Management → Narrative → Timeline → Deployment), plus **Phase 9 (Tellings)** — Issues 28-36 — and **Phase 10 (Account Recovery)**, **Phase 11 (Real-World Enrichment)**, **Phase 12 (Timeline)** and **Phase 13 (Entity Management)**, all cut as tracer bullets. The deployment target is no longer Render: MEMIND now runs on the homelab box behind Traefik and cloudflared at `memory.cloutier.work`, with Postgres.
 
-**Current status (2026-09-29):** 40 issues. Done: 2–6, 8–26, 28–37, 40.
+**Current status (2026-09-30):** 40 issues. Done: 2–6, 8–26, 28–40.
 Partial: **1** (Postgres runs, the pgvector extension does not), **7** (similarity
 still computed in Python). Superseded: **27** (deployed to the homelab box
-rather than Render). Not started: **38** (half-built), **39**.
+rather than Render).
 
 **Remaining work by area:**
 
-1. **Enrichment (Issue 38)** — the lookup against Wikidata is built and tested;
-   storage, the endpoint and the UI are not. Facts must stay structurally
-   separate from the user's own words, with their source and fetch date.
-2. **Timeline revisit (Issue 39)** — still only an idea. Its grouping rules
-   predate tellings, and one telling can now supply most of a group.
-3. **pgvector (Issues 1 and 7)** — Postgres runs without the extension, so
+1. **pgvector (Issues 1 and 7)** — Postgres runs without the extension, so
    similarity is still computed in Python over fetched rows.
-4. **Extraction quality** — entities are missed. Deliberately deferred behind
+2. **Extraction quality** — entities are missed. Deliberately deferred behind
    the correction tools (Issue 40): no extractor is ever right about everything,
    and the correction path is the more durable half.
+3. **Fuzzy name matching** — the limitation actually met in practice: a place
+   looked up as "Mission Valley Theater" does not match "Cinemas". Noted in the
+   Issue 38 notes.
 
 **Dependencies:**
 - Phase 1 (Foundation) has no blockers
