@@ -1541,7 +1541,7 @@ Not written yet. Brainstorm first.
 
 ## PHASE 13: Entity Management
 
-### Issue 40: Split an entity
+### Issue 40: Correct an entity by hand — merge and split
 
 **Type:** AFK
 **Blocked by:** None
@@ -1550,18 +1550,21 @@ Not written yet. Brainstorm first.
 
 #### What to build
 
-Merging already exists and is reversible: two entities merge, the move is
-recorded in `entity_merges`, and it can be undone. The opposite is missing —
-there is no way to take one entity apart.
+Two halves of the same wish: being able to fix the entity graph yourself
+instead of waiting for the automation to be right.
 
-That matters when extraction put two people into one entity. "Dave" may be two
-different Daves, and once their mentions share an entity the only way back is
-undo, which reverses a *merge* — and no merge ever happened. It also matters
-when an alias resolved to the wrong person.
+**Merge, reachable by hand.** The API is done and reversible — `POST
+/entities/merge` records an `entity_merges` row and can be undone. But the only
+way to *reach* it is through `getMergeSuggestions()`, filtered to the entity
+you are looking at. If the automation does not propose a pair, the pair cannot
+be merged. You need to pick any same-kind entity and merge into it.
 
-Splitting means: choose some of an entity's mentions and move them to a new
-entity of the same kind. You are not dividing a person, you are correcting
-which mentions belong to whom.
+**Split, which does not exist at all.** That matters when extraction put two
+people into one entity. "Dave" may be two different Daves, and once their
+mentions share an entity the only way back is undo — which reverses a *merge*,
+and no merge ever happened. Splitting means choosing some of an entity's
+mentions and moving them to a new entity of the same kind. You are not dividing
+a person, you are correcting which mentions belong to whom.
 
 #### Open questions
 
@@ -1576,6 +1579,16 @@ which mentions belong to whom.
 - the containment hierarchy: what happens to a place's children
 
 #### Acceptance criteria
+
+**Merge by hand**
+
+- [ ] Any same-kind entity can be chosen as a merge target
+- [ ] The choice is not limited to what the automation suggested
+- [ ] The merge stays reversible, as it is today
+- [ ] Merging across kinds is still refused
+- [ ] Scoped to the owner
+
+**Split**
 
 - [ ] Mentions on an entity can be split out into a new entity
 - [ ] The new entity can be named
