@@ -2,17 +2,17 @@
 
 > **Status snapshot** — last reconciled 2026-09-29 against `master` @ `4cb7df2`.
 >
-> **Done (verified by code + tests):** Issues 2, 3, 4, 5, 6, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 28
+> **Done (verified by code + tests):** Issues 2, 3, 4, 5, 6, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 28, 29
 > **Partial:** Issue 1 (Postgres is now provisioned, but **the pgvector extension is not installed** — the database has only `plpgsql`; the schema, indexes and cross-DB type decorators are in place), Issue 7 (embeddings work via Ollama with a deterministic local fallback; **similarity is still computed in Python** — no ANN index, because pgvector is absent)
 > **Superseded:** Issue 27 — the deployment target changed. MEMIND runs in Docker Compose with Postgres on the homelab box, published through Traefik and cloudflared at `memory.cloutier.work`. The service is live; the Render-specific acceptance criteria no longer apply.
-> **Not started:** Phase 9, Issues 29–35 (Tellings). Issue 28 — the tracer bullet — is done, deployed and verified; Issue 29 is the only HITL slice.
+> **Not started:** Phase 9, Issues 30–35 (Tellings). Issues 28 (tracer bullet) and 29 (segmentation) are done, deployed and verified.
 >
 > **Key deviations from original plan:**
 > - **Storage:** production runs on Postgres 16 in Docker on the homelab box. SQLite (`memind.db`) remains the local-dev default.
 > - **Search:** full-text + semantic ranking done in Python over fetched rows, not Postgres `tsquery`/pgvector ANN.
 > - **Agents:** Ollama Cloud (`ollama.com/v1`, `gemma4:31b`) is primary. Story generation implements a Claude Opus fallback (`ANTHROPIC_API_KEY`), gated on a response-quality check; capture/refinement/enrichment are Ollama-only.
 > - **Transcription:** local `faster-whisper`; Issue 4's backend is wired. A 501 is still returned when the model or its dependency is genuinely unavailable — that is error handling, not the old stub.
-> - **Tests:** 398 backend passing, 1 skipped (the pgvector extension check) on in-memory SQLite, plus 11 frontend tests via vitest/jsdom.
+> - **Tests:** 407 backend passing, 1 skipped (the pgvector extension check) on in-memory SQLite, plus 13 frontend tests via vitest/jsdom.
 > - **Beyond the plan:** first-class entities, the privacy lock, the review queue and fuzzy dates all shipped outside the numbered issues, so this list understates the delivered surface.
 >
 > **Remaining work:** the pgvector half of Issue 1 (and the ANN search it would unblock in Issue 7), Phase 9 (Tellings, Issues 28–35), and active iteration on capture/parsing quality (Issues 4–6 area).
@@ -982,15 +982,37 @@ a human has listened to a genuine recording and agreed the split is usable.
 
 #### Acceptance criteria
 
-- [ ] One model pass produces an ordered list of segments from a transcript
-- [ ] Each segment carries verbatim transcript text, not offsets
-- [ ] Segments are normalised through the existing single-memory validation
-- [ ] Segmentation works on a transcript with no paragraph breaks and
+- [x] One model pass produces an ordered list of segments from a transcript
+- [x] Each segment carries verbatim transcript text, not offsets
+- [x] Segments are normalised through the existing single-memory validation
+- [x] Segmentation works on a transcript with no paragraph breaks and
       unreliable punctuation
-- [ ] A failing or unusable model falls back to one segment covering the whole
+- [x] A failing or unusable model falls back to one segment covering the whole
       transcript
-- [ ] The review screen shows the multiple proposed memories
-- [ ] A human has validated the split against a real recording
+- [x] The review screen shows the multiple proposed memories
+- [x] A human has validated the split against a real recording
+
+> **Status: DONE.** Validated against two real accounts, the second written
+> deliberately non-linear and self-correcting; the split held, and the account
+> was not duplicated even though it described the same event twice.
+>
+> Two problems surfaced only under real accounts, both cases of the model
+> over-helping, and both now guarded:
+>
+> - a year mentioned in passing ("the DJ played early 2000s throwbacks") was
+>   being used as the memory's date. The prompt forbids incidental dates, and
+>   an explicit null from the segmenter now beats the deterministic scan in
+>   `_build_structured_memory`, which would otherwise put the year straight back
+> - a day and month with no year ("August 15th") came back as `1900-08-15`
+>   marked `exact`. Exact dates whose year never appears in the segment text
+>   are now dropped; only exact dates are policed, since a decade or range is
+>   an honestly fuzzy answer
+>
+> Known and accepted: the model occasionally inserts a missing space while
+> copying a span (Whisper output has them). One character in ~1800, meaning
+> unchanged, judged not worth chasing.
+>
+> The web UI gains a Story tab on the capture surface as part of this work.
 
 ---
 
@@ -1124,6 +1146,8 @@ produces a new draft and leaves the already-committed memories untouched.
 - [ ] Re-running segmentation replaces the existing draft segments
 - [ ] Re-splitting a committed telling does not modify its committed memories
 - [ ] The user is warned before a re-split discards the current draft
+- [ ] After a re-split the user can see what changed: which segments are new,
+      which are gone, and which survived with edits
 
 ---
 
@@ -1159,10 +1183,42 @@ survive so the spoken words are never lost.
 
 ---
 
+### Issue 36: Return to a draft telling
+
+**Type:** AFK
+**Blocked by:** Issue 28
+**User stories covered:** new — raised after using the flow
+
+#### What to build
+
+A telling already persists as a draft from the moment it is created, and
+segment edits are saved as they are made. What is missing is any way to *find*
+one again. Only `GET /tellings/{id}` exists, so a telling abandoned mid-review
+is effectively lost — reachable only if you kept the URL.
+
+Give the user a place to see their uncommitted tellings and reopen one, and
+make the capture surface point at it when a draft is waiting. The same list
+should show tellings that failed to transcribe or segment, since those hold the
+user's words and currently surface nowhere either.
+
+Distinguish clearly between drafts and committed tellings in that list, because
+only drafts can be resumed.
+
+#### Acceptance criteria
+
+- [ ] Uncommitted tellings can be listed for the signed-in user
+- [ ] A draft can be reopened and resumed exactly where it was left
+- [ ] Tellings that failed transcription or segmentation are listed, not hidden
+- [ ] Committed tellings are distinguishable from drafts
+- [ ] The list is scoped to its owner
+- [ ] The capture surface shows when a draft is waiting to be finished
+
+---
+
 ## Summary
 
-**Total Issues:** 35  
-**Vertical slices:** Organized in 8 build phases (Foundation → Infrastructure → Core Processing → Search → Management → Narrative → Timeline → Deployment), plus **Phase 9 (Tellings)** — Issues 28-35, cut as tracer bullets. Note also that the deployment target is no longer Render: MEMIND now runs on the homelab box behind Traefik and cloudflared at `memory.cloutier.work`, with Postgres.
+**Total Issues:** 36  
+**Vertical slices:** Organized in 8 build phases (Foundation → Infrastructure → Core Processing → Search → Management → Narrative → Timeline → Deployment), plus **Phase 9 (Tellings)** — Issues 28-36, cut as tracer bullets. Note also that the deployment target is no longer Render: MEMIND now runs on the homelab box behind Traefik and cloudflared at `memory.cloutier.work`, with Postgres.
 
 **Current status (2026-09-22):** 24 of 27 issues done; 3 partial (1, 4, 7) and 1 not started (27).
 
@@ -1171,7 +1227,7 @@ survive so the spoken words are never lost.
 2. **Voice transcription (Issue 4)** — wire an actual transcription backend; today `_transcribe_audio` returns 501.
 3. **Frontend depth (Issues 20–22, 24)** — semantic search mode, date filters, relevance scores, pagination, rich-text/entity editor, related-memories sidebar, autosave, streak counter.
 4. **Capture & parsing quality (Issues 4–6)** — active iteration area.
-5. **Tellings (Phase 9, Issues 28–35)** — multi-memory capture from a single recounting. Not started. Issue 28 is the tracer bullet (tell a story, commit one memory) and everything else hangs off it; Issue 29 is the only HITL slice.
+5. **Tellings (Phase 9, Issues 28–36)** — multi-memory capture from a single recounting. Issues 28 and 29 are done; 30 (dates resolving within the story) is next, and it is the purest TDD target of the set. Issue 35 (spoken tellings) is what makes audio recording work for a story.
 
 **Dependencies:**
 - Phase 1 (Foundation) has no blockers
