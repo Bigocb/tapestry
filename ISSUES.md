@@ -1,6 +1,6 @@
 # Tapestry Issues - Vertical Slices
 
-> **Status snapshot** — last reconciled 2026-09-30 against `main` @ `b086679`.
+> **Status snapshot** — last reconciled 2026-09-30 against `main` @ `f3f582b`.
 >
 > **Done (verified by code + tests):** Issues 2, 3, 4, 5, 6, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40
 > **Partial:** Issue 1 (Postgres is now provisioned, but **the pgvector extension is not installed** — the database has only `plpgsql`; the schema, indexes and cross-DB type decorators are in place), Issue 7 (embeddings work via Ollama with a deterministic local fallback; **similarity is still computed in Python** — no ANN index, because pgvector is absent)
@@ -12,7 +12,7 @@
 > - **Search:** full-text + semantic ranking done in Python over fetched rows, not Postgres `tsquery`/pgvector ANN.
 > - **Agents:** Ollama Cloud (`ollama.com/v1`, `gemma4:31b`) is primary. Story generation implements a Claude Opus fallback (`ANTHROPIC_API_KEY`), gated on a response-quality check; capture/refinement/enrichment are Ollama-only.
 > - **Transcription:** local `faster-whisper`; Issue 4's backend is wired. A 501 is still returned when the model or its dependency is genuinely unavailable — that is error handling, not the old stub.
-> - **Tests:** 470 backend passing, 1 skipped (the pgvector extension check) on in-memory SQLite, plus 54 frontend tests via vitest/jsdom.
+> - **Tests:** 475 backend passing, 1 skipped (the pgvector extension check) on in-memory SQLite, plus 54 frontend tests via vitest/jsdom.
 > - **Beyond the plan:** first-class entities, the privacy lock, the review queue and fuzzy dates all shipped outside the numbered issues, so this list understates the delivered surface.
 >
 > **Remaining work:** the pgvector half of Issue 1 (and the ANN search it would unblock in Issue 7), active iteration on capture/parsing quality (Issues 4–6 area), and fuzzy name matching for place lookup (the known limitation met in practice).
@@ -1503,12 +1503,12 @@ match is right is the same thing that makes a wrong match visible.
 > a city, a family name and an Australian electorate**; "Bluebird Cafe" a
 > Nashville music club and a Californian restaurant.
 >
-> **The motivating example only half works.** "Mission Valley Cinemas" resolves
-> to Q43096397, a movie theater in Raleigh — but **"Mission Valley Theater"
-> finds nothing**, because Wikidata's label differs by one word. So the lookup
-> is sound and the name has to be near Wikidata's. Worth knowing before
-> concluding the feature is broken: it is the matching that is narrow, not the
-> lookup.
+> **The motivating example now works.** "Mission Valley Cinemas" resolves to
+> Q43096397, a movie theater in Raleigh, and **"Mission Valley Theater" now
+> finds it too**, because the generic word "Theater" is dropped and the
+> distinctive part "Mission Valley" is searched when the exact wording finds
+> nothing relevant. The match still shows its own label and description so a
+> wrong broadened match is visible.
 >
 > People are refused with a 400 rather than an empty list, so the refusal is
 > visible rather than looking like "nothing found".
@@ -1517,8 +1517,9 @@ match is right is the same thing that makes a wrong match visible.
 
 - Automatic lookup on entity creation.
 - Overpass/OSM as a second source, and merging sources.
-- Fuzzy name matching, which is what would rescue "Theater" for "Cinemas".
-  Noted because it is the actual limitation met in practice, not a hypothetical.
+- [x] Fuzzy name matching — a name with a generic venue word like "Theater"
+  broadens to its distinctive part ("Mission Valley") when the exact wording
+  finds nothing relevant. Implemented in `app/lookup.py`.
 - Fetching the entity's claims — founded, dissolved, located in — into
   `entity_facts.data`, which the column already has room for.
 
@@ -1703,9 +1704,9 @@ rather than Render).
 2. **Extraction quality** — entities are missed. Deliberately deferred behind
    the correction tools (Issue 40): no extractor is ever right about everything,
    and the correction path is the more durable half.
-3. **Fuzzy name matching** — the limitation actually met in practice: a place
-   looked up as "Mission Valley Theater" does not match "Cinemas". Noted in the
-   Issue 38 notes.
+3. **Entity claims from Wikidata** — founded/dissolved/located-in are not yet
+   fetched into `entity_facts.data`, though the column has room for them.
+   Deferred in the Issue 38 notes.
 
 **Dependencies:**
 - Phase 1 (Foundation) has no blockers
