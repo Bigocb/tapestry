@@ -1330,9 +1330,53 @@ the host, so the log path is what will actually run first.
 
 ---
 
+## PHASE 11: Real-World Enrichment
+
+### Issue 38: Look real-world things up
+
+**Type:** AFK
+**Blocked by:** None
+**User stories covered:** new — raised while using the app
+**Status:** idea only. Brainstorm before this becomes work.
+
+#### What to build
+
+A memory says "we saw a show at Mission Valley Theater in Raleigh". MEMIND
+stores an entity called "Mission Valley Theater" and a place "Raleigh", and
+does nothing else with them. The theatre closed years ago — which is exactly
+the sort of thing a memory system could know, and the user cannot be expected
+to.
+
+So the idea: when a memory names a real-world thing, attach something useful —
+an address, what the place was, whether it still exists, when it closed. Not
+invented prose. Looked-up facts, with a source, held separately from what the
+user actually said.
+
+Related: `ENRICHMENT_IDEAS.md` already collects proposals in this area, and the
+Enrichment Agent (Issue 8) exists — but it enriches from the user's *other
+memories*, not from the outside world. This is the outside world.
+
+#### Open questions to settle first
+
+- lookup source: OpenStreetMap/Overpass, Wikipedia, a geocoder — and how to do
+  it without a paid dependency or an API key that expires
+- where it lives: on the entity, on the memory, or as a separate attachment so
+  it can never pollute the user's own words
+- how it is shown without the user mistaking a looked-up fact for their own
+  recollection — this matters more than it sounds, on a platform whose value is
+  that the memories are *yours*
+- what happens when the lookup is wrong, and whether the user can correct it
+- whether a closed business is *worth* flagging, or just noise
+
+#### Acceptance criteria
+
+Not written yet. Brainstorm first.
+
+---
+
 ## Summary
 
-**Total Issues:** 37  
+**Total Issues:** 38  
 **Vertical slices:** Organized in 8 build phases (Foundation → Infrastructure → Core Processing → Search → Management → Narrative → Timeline → Deployment), plus **Phase 9 (Tellings)** — Issues 28-36, cut as tracer bullets. Note also that the deployment target is no longer Render: MEMIND now runs on the homelab box behind Traefik and cloudflared at `memory.cloutier.work`, with Postgres.
 
 **Current status (2026-09-22):** 24 of 27 issues done; 3 partial (1, 4, 7) and 1 not started (27).
