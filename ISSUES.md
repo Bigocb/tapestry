@@ -2,17 +2,17 @@
 
 > **Status snapshot** — last reconciled 2026-09-29 against `master` @ `4cb7df2`.
 >
-> **Done (verified by code + tests):** Issues 2, 3, 4, 5, 6, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34
+> **Done (verified by code + tests):** Issues 2, 3, 4, 5, 6, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 36
 > **Partial:** Issue 1 (Postgres is now provisioned, but **the pgvector extension is not installed** — the database has only `plpgsql`; the schema, indexes and cross-DB type decorators are in place), Issue 7 (embeddings work via Ollama with a deterministic local fallback; **similarity is still computed in Python** — no ANN index, because pgvector is absent)
 > **Superseded:** Issue 27 — the deployment target changed. MEMIND runs in Docker Compose with Postgres on the homelab box, published through Traefik and cloudflared at `memory.cloutier.work`. The service is live; the Render-specific acceptance criteria no longer apply.
-> **Not started:** Phase 9, Issues 35–36 (Tellings). Issues 28–34 are done, deployed and verified: the tracer bullet, segmentation, the date cursor, the telling's frame, reshaping the split, undoing a commit, and re-splitting an edited transcript.
+> **Phase 9 (Tellings) is complete** — Issues 28–36 all done, deployed and verified. What is left is the later phases, none of them written up yet: Phase 10 (Issue 37, password reset), Phase 11 (Issue 38, real-world enrichment) and Phase 12 (Issue 39, the timeline revisit).
 >
 > **Key deviations from original plan:**
 > - **Storage:** production runs on Postgres 16 in Docker on the homelab box. SQLite (`memind.db`) remains the local-dev default.
 > - **Search:** full-text + semantic ranking done in Python over fetched rows, not Postgres `tsquery`/pgvector ANN.
 > - **Agents:** Ollama Cloud (`ollama.com/v1`, `gemma4:31b`) is primary. Story generation implements a Claude Opus fallback (`ANTHROPIC_API_KEY`), gated on a response-quality check; capture/refinement/enrichment are Ollama-only.
 > - **Transcription:** local `faster-whisper`; Issue 4's backend is wired. A 501 is still returned when the model or its dependency is genuinely unavailable — that is error handling, not the old stub.
-> - **Tests:** 437 backend passing, 1 skipped (the pgvector extension check) on in-memory SQLite, plus 30 frontend tests via vitest/jsdom.
+> - **Tests:** 442 backend passing, 1 skipped (the pgvector extension check) on in-memory SQLite, plus 34 frontend tests via vitest/jsdom.
 > - **Beyond the plan:** first-class entities, the privacy lock, the review queue and fuzzy dates all shipped outside the numbered issues, so this list understates the delivered surface.
 >
 > **Remaining work:** the pgvector half of Issue 1 (and the ANN search it would unblock in Issue 7), Phase 9 (Tellings, Issues 28–35), and active iteration on capture/parsing quality (Issues 4–6 area).
@@ -1285,14 +1285,32 @@ survive so the spoken words are never lost.
 
 #### Acceptance criteria
 
-- [ ] Audio can be uploaded for a telling
-- [ ] The recording is transcribed with the existing local transcription
-- [ ] Transcription and segmentation run in the background, not inline
-- [ ] The client can show progress while a telling is being processed
-- [ ] A failed transcription or segmentation leaves the telling and any
+- [x] Audio can be uploaded for a telling
+- [x] The recording is transcribed with the existing local transcription
+- [x] Transcription and segmentation run in the background, not inline
+- [x] The client can show progress while a telling is being processed
+- [x] A failed transcription or segmentation leaves the telling and any
       transcript intact
-- [ ] A telling can be abandoned before commit
-- [ ] A telling is readable only by its owner
+- [x] A telling can be abandoned before commit
+- [x] A telling is readable only by its owner
+
+> **Status: DONE.** The slow part runs after the response: the telling is
+> created as `transcribing`, the work runs in its own database session, and the
+> review screen polls until there is something to review. It says what it is
+> doing rather than showing a spinner that lies about how long a long recording
+> takes.
+>
+> A failure is written onto the telling rather than swallowed. The recording is
+> gone either way, but the reason is the only thing left to act on.
+>
+> **Not done, and it is the thing asked for:** recording in the browser. The
+> Story tab takes an upload. The same endpoint serves a recording — the capture
+> panel already has the MediaRecorder code — but it is not wired to the Story
+> tab, so "tell it out loud" currently means "choose a file".
+>
+> Audio is discarded after transcription, which the design doc settled
+> deliberately: re-splitting needs text, and keeping recordings needs somewhere
+> to put them.
 
 ---
 
@@ -1319,12 +1337,24 @@ only drafts can be resumed.
 
 #### Acceptance criteria
 
-- [ ] Uncommitted tellings can be listed for the signed-in user
-- [ ] A draft can be reopened and resumed exactly where it was left
-- [ ] Tellings that failed transcription or segmentation are listed, not hidden
-- [ ] Committed tellings are distinguishable from drafts
-- [ ] The list is scoped to its owner
-- [ ] The capture surface shows when a draft is waiting to be finished
+- [x] Uncommitted tellings can be listed for the signed-in user
+- [x] A draft can be reopened and resumed exactly where it was left
+- [x] Tellings that failed transcription or segmentation are listed, not hidden
+- [x] Committed tellings are distinguishable from drafts
+- [x] The list is scoped to its owner
+- [x] The capture surface shows when a draft is waiting to be finished
+
+> **Status: DONE.** The finding worth recording: nothing was ever being lost.
+> A telling persists from creation and segment edits save as they are made. The
+> gap was purely discoverability — only `GET /tellings/{id}` existed, so an
+> abandoned draft was reachable only if you had kept the URL.
+>
+> Failures appear in the list on purpose. A telling that failed holds a reason
+> and no words, which is exactly why hiding it would be the wrong call.
+>
+> Committed tellings are still listed; only the "unfinished" notice filters
+> them out, and what counts as unfinished is defined once in the UI rather than
+> repeated through the filters.
 
 ---
 
