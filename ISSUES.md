@@ -2,17 +2,17 @@
 
 > **Status snapshot** — last reconciled 2026-09-29 against `master` @ `4cb7df2`.
 >
-> **Done (verified by code + tests):** Issues 2, 3, 4, 5, 6, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 36
+> **Done (verified by code + tests):** Issues 2, 3, 4, 5, 6, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 40
 > **Partial:** Issue 1 (Postgres is now provisioned, but **the pgvector extension is not installed** — the database has only `plpgsql`; the schema, indexes and cross-DB type decorators are in place), Issue 7 (embeddings work via Ollama with a deterministic local fallback; **similarity is still computed in Python** — no ANN index, because pgvector is absent)
 > **Superseded:** Issue 27 — the deployment target changed. MEMIND runs in Docker Compose with Postgres on the homelab box, published through Traefik and cloudflared at `memory.cloutier.work`. The service is live; the Render-specific acceptance criteria no longer apply.
-> **Phases 9 (Tellings) and 10 (Account Recovery) are complete** — Issues 28–37 all done, deployed and verified. What is left is Phase 11 (Issue 38, real-world enrichment) and Phase 12 (Issue 39, the timeline revisit), neither of them specified yet.
+> **Phases 9 (Tellings), 10 (Account Recovery) and 13 (Entity Management) are complete.** Outstanding: **Issue 38** (real-world enrichment — the lookup is built, storage and UI are not), **Issue 39** (the timeline revisit, still only an idea), and Phase 11's remaining half.
 >
 > **Key deviations from original plan:**
 > - **Storage:** production runs on Postgres 16 in Docker on the homelab box. SQLite (`memind.db`) remains the local-dev default.
 > - **Search:** full-text + semantic ranking done in Python over fetched rows, not Postgres `tsquery`/pgvector ANN.
 > - **Agents:** Ollama Cloud (`ollama.com/v1`, `gemma4:31b`) is primary. Story generation implements a Claude Opus fallback (`ANTHROPIC_API_KEY`), gated on a response-quality check; capture/refinement/enrichment are Ollama-only.
 > - **Transcription:** local `faster-whisper`; Issue 4's backend is wired. A 501 is still returned when the model or its dependency is genuinely unavailable — that is error handling, not the old stub.
-> - **Tests:** 454 backend passing, 1 skipped (the pgvector extension check) on in-memory SQLite, plus 38 frontend tests via vitest/jsdom.
+> - **Tests:** 464 backend passing, 1 skipped (the pgvector extension check) on in-memory SQLite, plus 41 frontend tests via vitest/jsdom.
 > - **Beyond the plan:** first-class entities, the privacy lock, the review queue and fuzzy dates all shipped outside the numbered issues, so this list understates the delivered surface.
 >
 > **Remaining work:** the pgvector half of Issue 1 (and the ANN search it would unblock in Issue 7), Phase 9 (Tellings, Issues 28–35), and active iteration on capture/parsing quality (Issues 4–6 area).
@@ -1582,20 +1582,41 @@ a person, you are correcting which mentions belong to whom.
 
 **Merge by hand**
 
-- [ ] Any same-kind entity can be chosen as a merge target
-- [ ] The choice is not limited to what the automation suggested
-- [ ] The merge stays reversible, as it is today
-- [ ] Merging across kinds is still refused
-- [ ] Scoped to the owner
+- [x] Any same-kind entity can be chosen as a merge target
+- [x] The choice is not limited to what the automation suggested
+- [x] The merge stays reversible, as it is today
+- [x] Merging across kinds is still refused
+- [x] Scoped to the owner
 
 **Split**
 
-- [ ] Mentions on an entity can be split out into a new entity
-- [ ] The new entity can be named
-- [ ] Both entities' counts and first/last-seen are recomputed
-- [ ] Aliases that described only the moved mentions move with them
-- [ ] The split is reversible, on the same footing as a merge
-- [ ] Scoped to the owner
+- [x] Mentions on an entity can be split out into a new entity
+- [x] The new entity can be named
+- [x] Both entities' counts and first/last-seen are recomputed
+- [x] Aliases that described only the moved mentions move with them
+- [x] The split is reversible, on the same footing as a merge
+- [x] Scoped to the owner
+
+> **Status: DONE.** The correction that mattered: merging was *already*
+> implemented and reversible, but reachable only through
+> `getMergeSuggestions()` filtered to the entity in view. If the automation had
+> not noticed a pair, that pair could not be merged — which is exactly the
+> situation where you want to. The page now offers any same-kind entity.
+>
+> Split is the half undo cannot reach. `undo_merge` reverses a merge; when
+> extraction read two people as one, no merge ever happened, so there was no
+> way back at all.
+>
+> The API speaks **memories**, not mentions. A caller thinks "this memory is the
+> wrong Dave"; which mention that happens to be is an implementation detail, so
+> the route resolves it rather than making every caller learn the concept.
+>
+> Two bugs the tests caught, both from sessions running with `autoflush` off.
+> The "what is still in use here" query ran before the moves were flushed, so
+> it saw the old state and left every alias behind. Worse, deleting the new
+> entity triggered its cascade `delete-orphan` over a stale collection and
+> removed the mentions that had just been moved back. One `flush()` fixes each,
+> and both were silent data loss rather than a visible failure.
 
 #### Notes
 
@@ -1611,16 +1632,23 @@ the two, since no extractor is ever right about everything.
 **Total Issues:** 40  
 **Vertical slices:** Organized in 8 build phases (Foundation → Infrastructure → Core Processing → Search → Management → Narrative → Timeline → Deployment), plus **Phase 9 (Tellings)** — Issues 28-36, cut as tracer bullets. Note also that the deployment target is no longer Render: MEMIND now runs on the homelab box behind Traefik and cloudflared at `memory.cloutier.work`, with Postgres.
 
-**Current status (2026-09-22):** 24 of 27 issues done; 3 partial (1, 4, 7) and 1 not started (27).
+**Current status (2026-09-29):** 40 issues. Done: 2–6, 8–26, 28–37, 40.
+Partial: **1** (Postgres runs, the pgvector extension does not), **7** (similarity
+still computed in Python). Superseded: **27** (deployed to the homelab box
+rather than Render). Not started: **38** (half-built), **39**.
 
 **Remaining work by area:**
-1. **Deploy (Issue 27)** — Render web service + Postgres/pgvector; also unblocks native tsquery/pgvector search.
-2. **Voice transcription (Issue 4)** — wire an actual transcription backend; today `_transcribe_audio` returns 501.
-3. **Frontend depth (Issues 20–22, 24)** — semantic search mode, date filters, relevance scores, pagination, rich-text/entity editor, related-memories sidebar, autosave, streak counter.
-4. **Capture & parsing quality (Issues 4–6)** — active iteration area.
-5. **Tellings (Phase 9, Issues 28–36)** — multi-memory capture from a single recounting. Issues 28 and 29 are done; 30 (dates resolving within the story) is nearly done — its cursor works and two UI criteria remain. Issue 35 (spoken tellings) is what makes audio recording work for a story.
 
-6. **Account recovery (Phase 10, Issue 37)** — there is no way back into an account whose password is lost; the operator had to reset one by hand. Not blocking, but the only security-shaped gap outstanding.
+1. **Enrichment (Issue 38)** — the lookup against Wikidata is built and tested;
+   storage, the endpoint and the UI are not. Facts must stay structurally
+   separate from the user's own words, with their source and fetch date.
+2. **Timeline revisit (Issue 39)** — still only an idea. Its grouping rules
+   predate tellings, and one telling can now supply most of a group.
+3. **pgvector (Issues 1 and 7)** — Postgres runs without the extension, so
+   similarity is still computed in Python over fetched rows.
+4. **Extraction quality** — entities are missed. Deliberately deferred behind
+   the correction tools (Issue 40): no extractor is ever right about everything,
+   and the correction path is the more durable half.
 
 **Dependencies:**
 - Phase 1 (Foundation) has no blockers
