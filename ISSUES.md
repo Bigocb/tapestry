@@ -1226,9 +1226,61 @@ only drafts can be resumed.
 
 ---
 
+## PHASE 10: Account Recovery
+
+### Issue 37: Password reset with a one-time token
+
+**Type:** AFK
+**Blocked by:** None
+**User stories covered:** new — raised after the operator was locked out
+
+#### What to build
+
+There is no way to recover an account. Auth offers register, login and refresh
+only, and the operator of this instance recently had to reset a password by
+hand against the database. That is a poor answer for a product whose whole
+premise is that your memories live inside it.
+
+Add a reset flow built on a one-time token:
+
+- requesting a reset creates a single-use token, stored **hashed**, with a
+  short expiry and a used-at stamp
+- delivery is pluggable: if SMTP is configured the link is emailed, otherwise
+  it is written to the application log and a supported command prints a
+  ready-made link
+- following the link lets the user set a new password, which invalidates that
+  token and any other outstanding tokens for the account
+
+**The API must never return the token in its response.** The moment it does,
+anyone who knows a username — and these usernames are guessable — can take over
+the account. "Displayed" means displayed to the operator, never to the caller.
+
+#### Acceptance criteria
+
+- [ ] A reset can be requested by username or email
+- [ ] The request answers identically whether or not the account exists, so it
+      cannot be used to discover who has an account
+- [ ] Tokens are stored hashed, never in plaintext
+- [ ] A token is single-use and expires
+- [ ] Completing a reset invalidates that token and any others outstanding
+- [ ] The token never appears in an HTTP response body
+- [ ] With no SMTP configured, the link is written to the log
+- [ ] With SMTP configured, the link is emailed instead
+- [ ] Reset requests are rate limited per account
+
+#### Notes
+
+Email is the only delivery that works away from the box, but a self-hosted
+domain needs SPF/DKIM or the reset lands in spam — worse than no reset at all.
+Hence the pluggable design: build the token machinery once, switch email on
+when a relay exists. There is no mail code in the project today and no relay on
+the host, so the log path is what will actually run first.
+
+---
+
 ## Summary
 
-**Total Issues:** 36  
+**Total Issues:** 37  
 **Vertical slices:** Organized in 8 build phases (Foundation → Infrastructure → Core Processing → Search → Management → Narrative → Timeline → Deployment), plus **Phase 9 (Tellings)** — Issues 28-36, cut as tracer bullets. Note also that the deployment target is no longer Render: MEMIND now runs on the homelab box behind Traefik and cloudflared at `memory.cloutier.work`, with Postgres.
 
 **Current status (2026-09-22):** 24 of 27 issues done; 3 partial (1, 4, 7) and 1 not started (27).
@@ -1238,7 +1290,9 @@ only drafts can be resumed.
 2. **Voice transcription (Issue 4)** — wire an actual transcription backend; today `_transcribe_audio` returns 501.
 3. **Frontend depth (Issues 20–22, 24)** — semantic search mode, date filters, relevance scores, pagination, rich-text/entity editor, related-memories sidebar, autosave, streak counter.
 4. **Capture & parsing quality (Issues 4–6)** — active iteration area.
-5. **Tellings (Phase 9, Issues 28–36)** — multi-memory capture from a single recounting. Issues 28 and 29 are done; 30 (dates resolving within the story) is next, and it is the purest TDD target of the set. Issue 35 (spoken tellings) is what makes audio recording work for a story.
+5. **Tellings (Phase 9, Issues 28–36)** — multi-memory capture from a single recounting. Issues 28 and 29 are done; 30 (dates resolving within the story) is nearly done — its cursor works and two UI criteria remain. Issue 35 (spoken tellings) is what makes audio recording work for a story.
+
+6. **Account recovery (Phase 10, Issue 37)** — there is no way back into an account whose password is lost; the operator had to reset one by hand. Not blocking, but the only security-shaped gap outstanding.
 
 **Dependencies:**
 - Phase 1 (Foundation) has no blockers
