@@ -14,7 +14,7 @@ DEFAULT_OLLAMA_MODEL = "gemma4:31b"
 REQUEST_TIMEOUT_SECONDS = 30.0
 
 
-ENRICHMENT_SYSTEM_PROMPT = """You are the Enrichment Agent for MEMIND.
+ENRICHMENT_SYSTEM_PROMPT = """You are the Enrichment Agent for Tapestry.
 Your job is to take a refined memory and up to 5 similar past memories, then suggest better metadata and thematic links.
 
 Input fields:

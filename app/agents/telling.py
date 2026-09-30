@@ -30,7 +30,7 @@ from app.agents.telling_dates import (
 from app.models.schemas import StructuredMemory
 
 
-SEGMENTATION_SYSTEM_PROMPT = """You are the Telling Agent for MEMIND, a memory-capture system.
+SEGMENTATION_SYSTEM_PROMPT = """You are the Telling Agent for Tapestry, a memory-capture system.
 A user has recounted several memories in one go. Split that account into the individual memories it contains.
 
 Output a single JSON object with one field:

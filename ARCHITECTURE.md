@@ -1,8 +1,8 @@
-# MEMIND: Memory Capture & Enrichment System
+# Tapestry: Memory Capture & Enrichment System
 
 ## Overview
 
-MEMIND is a multi-user AI-powered memory capture and enhancement platform. Users record voice memos, text, or form submissions. Specialized AI agents parse, refine, enrich, and help users build narratives from their memories. Features include rich editing, timeline browsing, hybrid search, story generation, and a "fun area" for insights and gamification.
+Tapestry is a multi-user AI-powered memory capture and enhancement platform. Users record voice memos, text, or form submissions. Specialized AI agents parse, refine, enrich, and help users build narratives from their memories. Features include rich editing, timeline browsing, hybrid search, story generation, and a "fun area" for insights and gamification.
 
 ---
 

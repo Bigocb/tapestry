@@ -1,4 +1,4 @@
-# MEMIND Enrichment Ideas
+# Tapestry Enrichment Ideas
 
 ## Overview
 

@@ -1,4 +1,4 @@
-"""SQLAlchemy ORM models for MEMIND."""
+"""SQLAlchemy ORM models for Tapestry."""
 
 from sqlalchemy import (
     Column,

@@ -14,7 +14,7 @@ DEFAULT_OLLAMA_MODEL = "gemma4:31b"
 REQUEST_TIMEOUT_SECONDS = 30.0
 
 
-REFINEMENT_SYSTEM_PROMPT = """You are the Refinement Agent for MEMIND.
+REFINEMENT_SYSTEM_PROMPT = """You are the Refinement Agent for Tapestry.
 Your job is to take a structured memory and, using the user's recent memories as context, resolve ambiguities and normalize entities.
 
 Input fields:

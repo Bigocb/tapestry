@@ -366,7 +366,7 @@ def _app_page(
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{_escape_html(page_title)} — MEMIND OpenWiki</title>
+  <title>{_escape_html(page_title)} — Tapestry OpenWiki</title>
   <style>
     :root {{
       --bg: #f7f8fa;
@@ -586,7 +586,7 @@ def _app_page(
 </head>
 <body>
   <header class="topbar">
-    <a class="brand" href="/api/wiki">MEMIND OpenWiki</a>
+    <a class="brand" href="/api/wiki">Tapestry OpenWiki</a>
     <nav>{''.join(brain_links)}</nav>
   </header>
 

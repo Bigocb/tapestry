@@ -80,8 +80,8 @@ def deliver(identifier: str, link: str) -> bool:
     from email.message import EmailMessage
 
     message = EmailMessage()
-    message["Subject"] = "Reset your MEMIND password"
-    message["From"] = os.getenv("SMTP_FROM", "memind@localhost")
+    message["Subject"] = "Reset your Tapestry password"
+    message["From"] = os.getenv("SMTP_FROM", "tapestry@localhost")
     message["To"] = identifier
     message.set_content(
         "Use this link to choose a new password:\n\n"

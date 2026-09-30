@@ -44,7 +44,7 @@ DEFAULT_OLLAMA_MODEL = "gemma4:31b"
 REQUEST_TIMEOUT_SECONDS = 30.0
 
 
-CAPTURE_SYSTEM_PROMPT = """You are the Capture Agent for MEMIND, a memory-capture system.
+CAPTURE_SYSTEM_PROMPT = """You are the Capture Agent for Tapestry, a memory-capture system.
 Your job is to take a user's raw memory input and return a concise structured JSON object.
 Do NOT resolve ambiguities (e.g., leave "that meeting" as-is). Do NOT add information you cannot infer from the input.
 

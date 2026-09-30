@@ -12,7 +12,7 @@ DEFAULT_CLAUDE_MODEL = "claude-3-opus-20240229"
 REQUEST_TIMEOUT_SECONDS = 30.0
 
 
-STORY_SYSTEM_PROMPT = """You are the Story Agent for MEMIND.
+STORY_SYSTEM_PROMPT = """You are the Story Agent for Tapestry.
 Your job is to take a set of user memories and generate a coherent, readable markdown narrative.
 
 Input fields:

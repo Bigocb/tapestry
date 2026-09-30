@@ -1,10 +1,10 @@
-# MEMIND Issues - Vertical Slices
+# Tapestry Issues - Vertical Slices
 
 > **Status snapshot** — last reconciled 2026-09-30 against `main` @ `b086679`.
 >
 > **Done (verified by code + tests):** Issues 2, 3, 4, 5, 6, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40
 > **Partial:** Issue 1 (Postgres is now provisioned, but **the pgvector extension is not installed** — the database has only `plpgsql`; the schema, indexes and cross-DB type decorators are in place), Issue 7 (embeddings work via Ollama with a deterministic local fallback; **similarity is still computed in Python** — no ANN index, because pgvector is absent)
-> **Superseded:** Issue 27 — the deployment target changed. MEMIND runs in Docker Compose with Postgres on the homelab box, published through Traefik and cloudflared at `memory.cloutier.work`. The service is live; the Render-specific acceptance criteria no longer apply.
+> **Superseded:** Issue 27 — the deployment target changed. Tapestry runs in Docker Compose with Postgres on the homelab box, published through Traefik and cloudflared at `memory.cloutier.work`. The service is live; the Render-specific acceptance criteria no longer apply.
 > **Phases 9 (Tellings), 10 (Account Recovery), 11 (Real-World Enrichment), 12 (Timeline) and 13 (Entity Management) are complete.** Every numbered issue is done or closed, apart from the two partials above.
 >
 > **Key deviations from original plan:**
@@ -852,7 +852,7 @@ Configuration:
 
 #### What to build
 
-Deploy complete MEMIND application to Render:
+Deploy complete Tapestry application to Render:
 - FastAPI service on Render (web service)
 - PostgreSQL instance (from Issue 1)
 - Environment variables configured (DATABASE_URL, OLLAMA_API_KEY, etc.)
@@ -1437,7 +1437,7 @@ the host, so the log path is what will actually run first.
 
 #### What to build
 
-A memory says "we saw a show at Mission Valley Theater in Raleigh". MEMIND
+A memory says "we saw a show at Mission Valley Theater in Raleigh". Tapestry
 stores an entity called "Mission Valley Theater" and a place "Raleigh", and
 does nothing else with them. The theatre closed years ago — which is exactly
 the sort of thing a memory system could know, and the user cannot be expected
@@ -1689,7 +1689,7 @@ the two, since no extractor is ever right about everything.
 ## Summary
 
 **Total Issues:** 40  
-**Vertical slices:** Organized in 8 build phases (Foundation → Infrastructure → Core Processing → Search → Management → Narrative → Timeline → Deployment), plus **Phase 9 (Tellings)** — Issues 28-36 — and **Phase 10 (Account Recovery)**, **Phase 11 (Real-World Enrichment)**, **Phase 12 (Timeline)** and **Phase 13 (Entity Management)**, all cut as tracer bullets. The deployment target is no longer Render: MEMIND now runs on the homelab box behind Traefik and cloudflared at `memory.cloutier.work`, with Postgres.
+**Vertical slices:** Organized in 8 build phases (Foundation → Infrastructure → Core Processing → Search → Management → Narrative → Timeline → Deployment), plus **Phase 9 (Tellings)** — Issues 28-36 — and **Phase 10 (Account Recovery)**, **Phase 11 (Real-World Enrichment)**, **Phase 12 (Timeline)** and **Phase 13 (Entity Management)**, all cut as tracer bullets. The deployment target is no longer Render: Tapestry now runs on the homelab box behind Traefik and cloudflared at `memory.cloutier.work`, with Postgres.
 
 **Current status (2026-09-30):** 40 issues. Done: 2–6, 8–26, 28–40.
 Partial: **1** (Postgres runs, the pgvector extension does not), **7** (similarity

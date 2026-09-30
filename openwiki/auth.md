@@ -1,13 +1,13 @@
 ---
 type: Reference
-title: MEMIND Authentication
-description: JWT authentication flow, password hashing, token refresh, and route protection in MEMIND.
-tags: [memind, auth, jwt, security]
+title: Tapestry Authentication
+description: JWT authentication flow, password hashing, token refresh, and route protection in Tapestry.
+tags: [tapestry, auth, jwt, security]
 ---
 
 # Authentication
 
-MEMIND uses JWT-based stateless authentication. All protected endpoints require a Bearer token in the `Authorization` header. Token claims are defined by Pydantic models in [Data Models](data-models.md) and the full application structure is described in [Architecture](architecture.md).
+Tapestry uses JWT-based stateless authentication. All protected endpoints require a Bearer token in the `Authorization` header. Token claims are defined by Pydantic models in [Data Models](data-models.md) and the full application structure is described in [Architecture](architecture.md).
 
 ## Registration Flow
 

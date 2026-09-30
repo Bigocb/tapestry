@@ -21,7 +21,7 @@ def client():
 def test_app_created():
     """FastAPI app is created."""
     assert app is not None
-    assert app.title == "MEMIND API"
+    assert app.title == "Tapestry API"
 
 
 def test_health_check(client):

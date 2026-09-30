@@ -44,7 +44,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
       <header className="bg-indigo-600 text-white">
         <div className="max-w-6xl mx-auto px-4 py-4 flex items-center justify-between">
           <Link href="/capture" className="text-xl font-bold">
-            MEMIND
+            Tapestry
           </Link>
           {token && (
             <nav className="flex items-center gap-4 text-sm">

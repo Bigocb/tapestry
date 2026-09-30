@@ -1,4 +1,4 @@
-"""One-off migration: copy every MEMIND row from SQLite into PostgreSQL.
+"""One-off migration: copy every Tapestry row from SQLite into PostgreSQL.
 
 The destination schema is created from the current ORM metadata, so it always
 matches what the application expects. Rows are inserted through the very same

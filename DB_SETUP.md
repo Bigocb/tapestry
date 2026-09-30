@@ -1,4 +1,4 @@
-# Database Setup - MEMIND
+# Database Setup - Tapestry
 
 ## Phase 1, Issue 1: Postgres with pgvector on Render
 

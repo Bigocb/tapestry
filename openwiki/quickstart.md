@@ -1,18 +1,18 @@
 ---
 type: Project Overview
-title: MEMIND Quickstart
-description: Entry point for the MEMIND wiki. MEMIND is a multi-user AI-powered memory capture and enhancement platform built with FastAPI, SQLAlchemy async, a pipeline of specialized AI agents, and a Next.js frontend.
-tags: [memind, quickstart, overview]
+title: Tapestry Quickstart
+description: Entry point for the Tapestry wiki. Tapestry is a multi-user AI-powered memory capture and enhancement platform built with FastAPI, SQLAlchemy async, a pipeline of specialized AI agents, and a Next.js frontend.
+tags: [tapestry, quickstart, overview]
 ---
 
-# MEMIND Quickstart
+# Tapestry Quickstart
 
-**MEMIND** is a multi-user AI-powered memory capture and enhancement platform.
+**Tapestry** is a multi-user AI-powered memory capture and enhancement platform.
 Users record voice memos, text, or form submissions; specialized AI agents
 parse, refine and enrich them; and the app surfaces them as a timeline, a
 searchable corpus, browsable people and places, and generated narratives.
 
-## What MEMIND Does
+## What Tapestry Does
 
 1. **Captures memories** via text, voice or form input (synchronous, instant feedback)
 2. **Refines and enriches** them through a background agent pipeline

@@ -4,7 +4,7 @@ import { AuthProvider } from "@/lib/auth";
 import { PrivacyProvider } from "@/lib/privacy";
 
 export const metadata: Metadata = {
-  title: "MEMIND",
+  title: "Tapestry",
   description: "AI-powered memory capture and enhancement",
 };
 

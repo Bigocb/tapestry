@@ -15,7 +15,7 @@ DEFAULT_OLLAMA_MODEL = "gemma4:31b"
 REQUEST_TIMEOUT_SECONDS = 8.0
 
 
-SEARCH_SYSTEM_PROMPT = """You are the Search Agent for MEMIND.
+SEARCH_SYSTEM_PROMPT = """You are the Search Agent for Tapestry.
 Your job is to parse a user's natural language query into a structured search request.
 
 Output a single JSON object with exactly these fields:

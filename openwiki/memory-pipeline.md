@@ -1,8 +1,8 @@
 ---
 type: Workflow
-title: MEMIND Memory Pipeline
+title: Tapestry Memory Pipeline
 description: How memories flow from capture through refinement and enrichment, how dates and entities are extracted, and how related memories are derived.
-tags: [memind, pipeline, memory, agents, entities, dates]
+tags: [tapestry, pipeline, memory, agents, entities, dates]
 ---
 
 # Memory Pipeline

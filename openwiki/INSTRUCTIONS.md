@@ -1,12 +1,12 @@
 ---
 type: Instructions
-title: MEMIND OpenWiki Instructions
-description: Agent instructions for documenting the MEMIND project.
+title: Tapestry OpenWiki Instructions
+description: Agent instructions for documenting the Tapestry project.
 ---
 
-# MEMIND OpenWiki Instructions
+# Tapestry OpenWiki Instructions
 
-This repository contains **MEMIND**, a multi-user AI-powered memory capture and enhancement platform.
+This repository contains **Tapestry**, a multi-user AI-powered memory capture and enhancement platform.
 
 ## Project focus
 

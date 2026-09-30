@@ -25,7 +25,7 @@ SEARCH_LIMIT = 5
 
 # Wikidata asks automated clients to identify themselves, and will throttle
 # anonymous ones.
-USER_AGENT = "MEMIND/0.1 (personal memory app; place lookup)"
+USER_AGENT = "Tapestry/0.1 (personal memory app; place lookup)"
 
 
 @dataclass(frozen=True)

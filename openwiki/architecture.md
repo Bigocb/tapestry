@@ -1,17 +1,17 @@
 ---
 type: Architecture
-title: MEMIND Architecture
+title: Tapestry Architecture
 description: FastAPI application structure, routing, middleware, dependency injection, and how the components fit together.
-tags: [memind, architecture, fastapi, routing, middleware]
+tags: [tapestry, architecture, fastapi, routing, middleware]
 ---
 
-# MEMIND Architecture
+# Tapestry Architecture
 
 ## Application Entry Point
 
 [`app/main.py`](../app/main.py) creates the `FastAPI` instance and owns startup:
 
-- Title `MEMIND API`, version `0.1.0`
+- Title `Tapestry API`, version `0.1.0`
 - OpenAPI tags: health, auth, memories, search, stories, timeline, insights,
   review, entities, wiki
 - **Lifespan** does real work: it drops the legacy `entities` table if present,

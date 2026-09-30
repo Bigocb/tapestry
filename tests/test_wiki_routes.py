@@ -25,7 +25,7 @@ def test_wiki_index_renders(client):
     response = client.get("/api/wiki")
     assert response.status_code == 200
     assert "text/html" in response.headers["content-type"]
-    assert "MEMIND OpenWiki" in response.text
+    assert "Tapestry OpenWiki" in response.text
     assert "Code Brain" in response.text
     assert "Personal Brain" in response.text
     assert "app-like" not in response.text  # sanity: no placeholder text
@@ -43,8 +43,8 @@ def test_wiki_code_brain_index(client):
     """Code brain index lists pages with front-matter titles."""
     response = client.get("/api/wiki/code")
     assert response.status_code == 200
-    # quickstart.md has front matter title "MEMIND Quickstart"
-    assert "MEMIND Quickstart" in response.text
+    # quickstart.md has front matter title "Tapestry Quickstart"
+    assert "Tapestry Quickstart" in response.text
     assert "index.md" in response.text or "Documentation Index" in response.text
 
 
@@ -68,7 +68,7 @@ def test_wiki_page_markdown(client):
     response = client.get("/api/wiki/code/pages/quickstart.md?format=markdown")
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/plain")
-    assert "MEMIND Quickstart" in response.text
+    assert "Tapestry Quickstart" in response.text
 
 
 def test_wiki_page_html_renders_markdown(client):
@@ -77,17 +77,17 @@ def test_wiki_page_html_renders_markdown(client):
     assert response.status_code == 200
     assert "text/html" in response.headers["content-type"]
     # Should contain rendered headings, not escaped Markdown source
-    assert "<h1>MEMIND Quickstart</h1>" in response.text
+    assert "<h1>Tapestry Quickstart</h1>" in response.text
     # Body content should not be inside a single pre wrapping the whole page
     assert response.text.count("<pre>") >= 0  # code blocks use pre legitimately
-    assert "# MEMIND Quickstart" not in response.text
+    assert "# Tapestry Quickstart" not in response.text
 
 
 def test_wiki_page_html_shows_front_matter(client):
     """HTML page shows title, description, and tags from front matter."""
     response = client.get("/api/wiki/code/pages/quickstart.md")
     assert response.status_code == 200
-    assert "Entry point for the MEMIND wiki" in response.text
+    assert "Entry point for the Tapestry wiki" in response.text
     assert "quickstart" in response.text.lower()
 
 
@@ -104,7 +104,7 @@ def test_wiki_page_html_format(client):
     response = client.get("/api/wiki/code/pages/quickstart.md?format=html")
     assert response.status_code == 200
     assert "text/html" in response.headers["content-type"]
-    assert "MEMIND Quickstart" in response.text
+    assert "Tapestry Quickstart" in response.text
 
 
 def test_wiki_page_not_found(client):

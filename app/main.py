@@ -1,4 +1,4 @@
-"""MEMIND FastAPI application entry point."""
+"""Tapestry FastAPI application entry point."""
 
 from dotenv import load_dotenv
 
@@ -430,7 +430,7 @@ tags_metadata = [
 async def lifespan(app: FastAPI):
     """Application lifespan events (startup/shutdown)."""
     # Startup
-    print("MEMIND application starting...")
+    print("Tapestry application starting...")
     # Must run before create_all: the legacy entities table cannot be migrated
     # in place, only dropped and recreated with the new shape.
     await _drop_legacy_entity_table()
@@ -444,12 +444,12 @@ async def lifespan(app: FastAPI):
     # Shutdown
     scheduler.shutdown(wait=False)
     print("APScheduler shut down.")
-    print("MEMIND application shutting down...")
+    print("Tapestry application shutting down...")
 
 
 # Create FastAPI app
 app = FastAPI(
-    title="MEMIND API",
+    title="Tapestry API",
     description="AI-powered memory capture and enhancement platform",
     version="0.1.0",
     openapi_tags=tags_metadata,

@@ -1,13 +1,13 @@
 ---
 type: Reference
-title: MEMIND Testing
-description: Test strategy, fixtures, patterns, and known limitations for MEMIND, including SQLite vs PostgreSQL compatibility notes.
-tags: [memind, testing, pytest, sqlite, postgresql]
+title: Tapestry Testing
+description: Test strategy, fixtures, patterns, and known limitations for Tapestry, including SQLite vs PostgreSQL compatibility notes.
+tags: [tapestry, testing, pytest, sqlite, postgresql]
 ---
 
 # Testing
 
-MEMIND uses **pytest** with **pytest-asyncio**. Tests run against an in-memory
+Tapestry uses **pytest** with **pytest-asyncio**. Tests run against an in-memory
 SQLite database, so the suite needs no running PostgreSQL and takes about three
 minutes end to end.
 

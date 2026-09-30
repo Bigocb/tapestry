@@ -1,4 +1,4 @@
-# MEMIND: AI-Powered Memory Capture & Enhancement Platform - PRD
+# Tapestry: AI-Powered Memory Capture & Enhancement Platform - PRD
 
 ## Problem Statement
 
@@ -13,7 +13,7 @@ Existing solutions (Notes, Notion, Diaries) lack intelligent agent support for r
 
 ## Solution
 
-MEMIND is a multi-user AI-powered platform that:
+Tapestry is a multi-user AI-powered platform that:
 1. **Captures memories** via voice, text, or form inputs (synchronous, instant feedback)
 2. **Automatically refines** raw captures through a pipeline of specialized AI agents (asynchronous background processing)
 3. **Enriches memories** with extracted entities, related memories via RAG, tags, and context
@@ -103,7 +103,7 @@ The system uses **Ollama Cloud API** for primary LLM tasks (open-source models) 
 46. As a user, I want to create an account with secure authentication, so that only I can see my memories
 47. As a user, I want my memories to be completely isolated from other users, so that privacy is guaranteed
 48. As a potential user, I want to sign up easily, so that I can start capturing quickly
-49. As a team using MEMIND, I want shared workspaces (future enhancement), so that we can have shared memory repositories
+49. As a team using Tapestry, I want shared workspaces (future enhancement), so that we can have shared memory repositories
 50. As a user, I want session management and token refresh, so that I stay securely logged in
 
 ---

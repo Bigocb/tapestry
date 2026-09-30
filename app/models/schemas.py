@@ -1,4 +1,4 @@
-"""Pydantic schemas for MEMIND API and data validation."""
+"""Pydantic schemas for Tapestry API and data validation."""
 
 from pydantic import BaseModel, ConfigDict, Field, EmailStr, field_validator
 from typing import Optional, List, Union

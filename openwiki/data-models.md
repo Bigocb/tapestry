@@ -1,13 +1,13 @@
 ---
 type: Reference
-title: MEMIND Data Models
+title: Tapestry Data Models
 description: SQLAlchemy ORM models and Pydantic schemas for memories, entities, stories, and jobs, including cross-database compatibility and the entity model.
-tags: [memind, data-models, pydantic, sqlalchemy, schema, entities]
+tags: [tapestry, data-models, pydantic, sqlalchemy, schema, entities]
 ---
 
 # Data Models
 
-MEMIND has two model layers: **SQLAlchemy ORM models** for persistence
+Tapestry has two model layers: **SQLAlchemy ORM models** for persistence
 ([`app/db/models.py`](../app/db/models.py)) and **Pydantic schemas** for API
 validation and serialisation ([`app/models/schemas.py`](../app/models/schemas.py)).
 For the entity model in depth see [`docs/ENTITY_MODEL.md`](../docs/ENTITY_MODEL.md).

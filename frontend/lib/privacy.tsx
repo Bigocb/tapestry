@@ -4,7 +4,7 @@ import { useCallback, useMemo, useSyncExternalStore } from "react";
 import { relockMemory, unlockMemory } from "./api";
 
 // Notify subscribers when the unlock list changes within this tab.
-const CHANGE_EVENT = "memind:unlock-change";
+const CHANGE_EVENT = "tapestry:unlock-change";
 
 function emitChange() {
   window.dispatchEvent(new Event(CHANGE_EVENT));
