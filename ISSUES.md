@@ -1539,9 +1539,63 @@ Not written yet. Brainstorm first.
 
 ---
 
+## PHASE 13: Entity Management
+
+### Issue 40: Split an entity
+
+**Type:** AFK
+**Blocked by:** None
+**User stories covered:** new — raised while using People and Places
+**Status:** raised; not started
+
+#### What to build
+
+Merging already exists and is reversible: two entities merge, the move is
+recorded in `entity_merges`, and it can be undone. The opposite is missing —
+there is no way to take one entity apart.
+
+That matters when extraction put two people into one entity. "Dave" may be two
+different Daves, and once their mentions share an entity the only way back is
+undo, which reverses a *merge* — and no merge ever happened. It also matters
+when an alias resolved to the wrong person.
+
+Splitting means: choose some of an entity's mentions and move them to a new
+entity of the same kind. You are not dividing a person, you are correcting
+which mentions belong to whom.
+
+#### Open questions
+
+- split by mention, by alias, or both? A mention is the thing that is actually
+  wrong; an alias with no mentions is harmless either way
+- does the new entity start unnamed, or borrow a name from the mentions moved?
+  (Borrowing risks the same conflation arriving by another route.)
+- should a split be as reversible as a merge, and does it need the same audit
+  trail?
+- what happens to `mention_count`, `first_seen_at` and `last_seen_at` on both
+  sides — both must be recomputed, not adjusted
+- the containment hierarchy: what happens to a place's children
+
+#### Acceptance criteria
+
+- [ ] Mentions on an entity can be split out into a new entity
+- [ ] The new entity can be named
+- [ ] Both entities' counts and first/last-seen are recomputed
+- [ ] Aliases that described only the moved mentions move with them
+- [ ] The split is reversible, on the same footing as a merge
+- [ ] Scoped to the owner
+
+#### Notes
+
+Raised together and deliberately deferred: **extraction misses some things**.
+That is a processing-quality question, separate from whether the user can
+correct the result by hand — and the correction path is the more durable of
+the two, since no extractor is ever right about everything.
+
+---
+
 ## Summary
 
-**Total Issues:** 39  
+**Total Issues:** 40  
 **Vertical slices:** Organized in 8 build phases (Foundation → Infrastructure → Core Processing → Search → Management → Narrative → Timeline → Deployment), plus **Phase 9 (Tellings)** — Issues 28-36, cut as tracer bullets. Note also that the deployment target is no longer Render: MEMIND now runs on the homelab box behind Traefik and cloudflared at `memory.cloutier.work`, with Postgres.
 
 **Current status (2026-09-22):** 24 of 27 issues done; 3 partial (1, 4, 7) and 1 not started (27).
