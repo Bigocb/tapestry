@@ -2,17 +2,17 @@
 
 > **Status snapshot** — last reconciled 2026-09-29 against `master` @ `4cb7df2`.
 >
-> **Done (verified by code + tests):** Issues 2, 3, 4, 5, 6, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 28, 29, 30, 31, 32, 33
+> **Done (verified by code + tests):** Issues 2, 3, 4, 5, 6, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34
 > **Partial:** Issue 1 (Postgres is now provisioned, but **the pgvector extension is not installed** — the database has only `plpgsql`; the schema, indexes and cross-DB type decorators are in place), Issue 7 (embeddings work via Ollama with a deterministic local fallback; **similarity is still computed in Python** — no ANN index, because pgvector is absent)
 > **Superseded:** Issue 27 — the deployment target changed. MEMIND runs in Docker Compose with Postgres on the homelab box, published through Traefik and cloudflared at `memory.cloutier.work`. The service is live; the Render-specific acceptance criteria no longer apply.
-> **Not started:** Phase 9, Issues 34–36 (Tellings). Issues 28–33 are done, deployed and verified: the tracer bullet, segmentation, the date cursor, the telling's frame, reshaping the split, and undoing a commit.
+> **Not started:** Phase 9, Issues 35–36 (Tellings). Issues 28–34 are done, deployed and verified: the tracer bullet, segmentation, the date cursor, the telling's frame, reshaping the split, undoing a commit, and re-splitting an edited transcript.
 >
 > **Key deviations from original plan:**
 > - **Storage:** production runs on Postgres 16 in Docker on the homelab box. SQLite (`memind.db`) remains the local-dev default.
 > - **Search:** full-text + semantic ranking done in Python over fetched rows, not Postgres `tsquery`/pgvector ANN.
 > - **Agents:** Ollama Cloud (`ollama.com/v1`, `gemma4:31b`) is primary. Story generation implements a Claude Opus fallback (`ANTHROPIC_API_KEY`), gated on a response-quality check; capture/refinement/enrichment are Ollama-only.
 > - **Transcription:** local `faster-whisper`; Issue 4's backend is wired. A 501 is still returned when the model or its dependency is genuinely unavailable — that is error handling, not the old stub.
-> - **Tests:** 435 backend passing, 1 skipped (the pgvector extension check) on in-memory SQLite, plus 27 frontend tests via vitest/jsdom.
+> - **Tests:** 437 backend passing, 1 skipped (the pgvector extension check) on in-memory SQLite, plus 30 frontend tests via vitest/jsdom.
 > - **Beyond the plan:** first-class entities, the privacy lock, the review queue and fuzzy dates all shipped outside the numbered issues, so this list understates the delivered surface.
 >
 > **Remaining work:** the pgvector half of Issue 1 (and the ANN search it would unblock in Issue 7), Phase 9 (Tellings, Issues 28–35), and active iteration on capture/parsing quality (Issues 4–6 area).
@@ -1235,16 +1235,32 @@ that there is nothing left to commit and offer the way back to the transcript.
 
 #### Acceptance criteria
 
-- [ ] A telling's transcript can be edited
-- [ ] Re-running segmentation replaces the existing draft segments
-- [ ] Re-splitting a committed telling does not modify its committed memories
-- [ ] The user is warned before a re-split discards the current draft
-- [ ] After a re-split the user can see what changed: which segments are new,
+- [x] A telling's transcript can be edited
+- [x] Re-running segmentation replaces the existing draft segments
+- [x] Re-splitting a committed telling does not modify its committed memories
+- [x] The user is warned before a re-split discards the current draft
+- [x] After a re-split the user can see what changed: which segments are new,
       which are gone, and which survived with edits
-- [ ] The transcript can be edited and re-split from the review screen, without
+- [x] The transcript can be edited and re-split from the review screen, without
       leaving it
-- [ ] Rejecting every segment leaves the user on a clear path to edit the
+- [x] Rejecting every segment leaves the user on a clear path to edit the
       transcript and re-run, rather than stuck on an empty draft
+
+> **Status: DONE.** One criterion was deliberately changed. It said re-splitting
+> a *committed* telling should leave the committed memories untouched — but
+> re-splitting replaces the segments, and the segments hold `memory_id`. The
+> memories would have survived as orphans nothing linked back to, undoing the
+> provenance Issue 33 had just built. It is refused with a 409 pointing at the
+> undo instead: delete the memories, then re-split. Three clicks, and the link
+> stays honest.
+>
+> The "what changed" diff is computed in the UI by comparing segment texts
+> before and after, so the server needs no diff machinery. A summary count is
+> what was asked for and what a person actually wants to know.
+>
+> The whole old split is discarded rather than patched, because it described
+> wording that no longer exists. The transcript field became a textarea, which
+> is what makes it editable at all.
 
 ---
 
