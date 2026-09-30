@@ -28,6 +28,7 @@ export function LoginForm() {
       <input
         type="text"
         placeholder="Username"
+        autoCapitalize="none" autoCorrect="off" spellCheck={false} autoComplete="username"
         className="w-full border rounded px-3 py-2"
         value={username}
         onChange={(e) => setUsername(e.target.value)}
@@ -36,6 +37,7 @@ export function LoginForm() {
       <input
         type="password"
         placeholder="Password"
+        autoCapitalize="none" autoCorrect="off" autoComplete="current-password"
         className="w-full border rounded px-3 py-2"
         value={password}
         onChange={(e) => setPassword(e.target.value)}
@@ -83,6 +85,7 @@ export function SignupForm({ onDone }: { onDone?: () => void }) {
       <input
         type="text"
         placeholder="Username"
+        autoCapitalize="none" autoCorrect="off" spellCheck={false} autoComplete="username"
         className="w-full border rounded px-3 py-2"
         value={username}
         onChange={(e) => setUsername(e.target.value)}
@@ -91,6 +94,7 @@ export function SignupForm({ onDone }: { onDone?: () => void }) {
       <input
         type="email"
         placeholder="Email"
+        autoCapitalize="none" autoCorrect="off" spellCheck={false} autoComplete="email"
         className="w-full border rounded px-3 py-2"
         value={email}
         onChange={(e) => setEmail(e.target.value)}
@@ -99,6 +103,7 @@ export function SignupForm({ onDone }: { onDone?: () => void }) {
       <input
         type="password"
         placeholder="Password"
+        autoCapitalize="none" autoCorrect="off" autoComplete="new-password"
         className="w-full border rounded px-3 py-2"
         value={password}
         onChange={(e) => setPassword(e.target.value)}
@@ -107,6 +112,7 @@ export function SignupForm({ onDone }: { onDone?: () => void }) {
       <input
         type="password"
         placeholder="Confirm password"
+        autoCapitalize="none" autoCorrect="off" autoComplete="new-password"
         className="w-full border rounded px-3 py-2"
         value={confirm}
         onChange={(e) => setConfirm(e.target.value)}

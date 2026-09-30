@@ -187,10 +187,20 @@ export interface Telling {
 }
 
 export const api = {
+  // No token dance on these two: a 401 here means the credentials were wrong,
+  // not that a session expired. Retrying through the refresh path discards any
+  // stored token and reports "Session expired", hiding the server's real reason
+  // — which on a phone is usually an autocapitalised username.
   login: (username: string, password: string) =>
-    request("POST", "/auth/login", { username, password }),
+    request("POST", "/auth/login", { username, password }, undefined, false),
   register: (username: string, email: string, password: string) =>
-    request("POST", "/auth/register", { username, email, password }),
+    request(
+      "POST",
+      "/auth/register",
+      { username, email, password },
+      undefined,
+      false
+    ),
   getSessionConfig: () => request("GET", "/auth/session-config"),
 
   captureText: (raw_input: string) =>
