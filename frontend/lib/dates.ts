@@ -65,6 +65,29 @@ export function formatMemoryDate(memory: DatedMemory): string {
  * 1980s section collects every decade memory whether or not it was labelled,
  * and a range groups by its year span rather than by its raw start date.
  */
+/**
+ * The decade a label is talking about, if it names one.
+ *
+ * "early 1980s", "late 1980s" and "1980s" are one period seen from different
+ * angles, and grouping them apart gave a single decade three headings. The
+ * wording stays on the row; only the grouping collapses.
+ *
+ * A bare year is not a decade, so "1994" is left alone — collapsing it would
+ * claim the memory covers ten years when it says one.
+ */
+function decadeOf(label: string): string | null {
+  const match = label.match(/\b((?:1[89]|20)?\d0)'?s\b/);
+  if (!match) return null;
+
+  const digits = match[1];
+  const year =
+    digits.length === 4
+      ? Number(digits)
+      : (Number(digits) < 30 ? 2000 : 1900) + Number(digits);
+
+  return `${Math.floor(year / 10) * 10}s`;
+}
+
 export function timelineGroupKey(memory: DatedMemory): string {
   if (memory.date_label) {
     const base = memory.date_label
@@ -72,7 +95,7 @@ export function timelineGroupKey(memory: DatedMemory): string {
       .replace(/\s+/g, " ")
       .trim()
       .toLowerCase();
-    if (base) return base;
+    if (base) return decadeOf(base) ?? base;
   }
 
   if (memory.event_date) {

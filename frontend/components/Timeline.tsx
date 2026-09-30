@@ -6,6 +6,12 @@ import { Memory } from "./MemoryCard";
 import { timelineGroupHeading, timelineGroupKey } from "@/lib/dates";
 import Link from "next/link";
 
+// Group keys are normalised labels and dates, so they can hold spaces and
+// commas; an id wants neither.
+function slug(key: string): string {
+  return key.replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "");
+}
+
 export function Timeline() {
   const [memories, setMemories] = useState<Memory[]>([]);
   const [error, setError] = useState("");
@@ -47,23 +53,60 @@ export function Timeline() {
     }
   }
 
-  const isFuzzy = (memory: Memory) =>
-    Boolean(memory.date_label) ||
-    memory.date_precision === "decade" ||
-    memory.date_precision === "range" ||
-    memory.date_precision === "year";
+  // A year is a precise answer, not an approximate one. Only a decade or a
+  // range claims less than it sounds like it does.
+  const isApproximate = (memory: Memory) =>
+    memory.date_precision === "decade" || memory.date_precision === "range";
+
+  const rowDetail = (memory: Memory, heading: string): string[] => {
+    const bits: string[] = [];
+
+    // A memory's own wording is worth a line when it says more than the
+    // heading it sits under.
+    const label = memory.date_label?.trim();
+    if (label && label.toLowerCase() !== heading.trim().toLowerCase()) {
+      bits.push(label);
+    } else if (isApproximate(memory)) {
+      bits.push("Approximate");
+    }
+
+    // Who and where, rather than a clock time. An exact date parsed from text
+    // carries midnight as its default, which is not information about anything.
+    if (memory.people?.length) bits.push(memory.people.join(", "));
+    if (memory.location) bits.push(memory.location);
+
+    return bits;
+  };
 
   return (
     <div className="max-w-3xl mx-auto">
       <h1 className="text-2xl font-bold mb-6">Timeline</h1>
       {error && <p className="text-red-600">{error}</p>}
+
+      {groupOrder.length > 1 && (
+        <nav className="mb-6 flex flex-wrap gap-x-3 gap-y-1 text-sm">
+          {groupOrder.map((key) => (
+            <a
+              key={key}
+              href={`#period-${slug(key)}`}
+              className="text-indigo-700 underline"
+            >
+              {timelineGroupHeading(byDate[key])}
+            </a>
+          ))}
+        </nav>
+      )}
       <div className="border-l-2 border-indigo-200 ml-3 space-y-6">
         {groupOrder.map((key) => {
           const items = byDate[key];
           const heading = timelineGroupHeading(items);
 
           return (
-            <div key={key} className="relative pl-6">
+            <div
+              key={key}
+              id={`period-${slug(key)}`}
+              className="relative pl-6 scroll-mt-4"
+            >
               <div className="absolute -left-[9px] top-1 w-4 h-4 rounded-full bg-indigo-600 border-2 border-white"></div>
               <h2 className="font-semibold text-lg mb-2">{heading}</h2>
               <ul className="space-y-2">
@@ -75,22 +118,10 @@ export function Timeline() {
                     >
                       {memory.title || memory.summary || memory.raw_input}
                     </Link>
-                    <p className="text-sm text-gray-500">
-                      {isFuzzy(memory)
-                        ? memory.date_label &&
-                          memory.date_label.trim().toLowerCase() !==
-                            heading.trim().toLowerCase()
-                          ? memory.date_label
-                          : "Approximate"
-                        : memory.event_date
-                          ? new Date(memory.event_date).toLocaleTimeString([], {
-                              hour: "2-digit",
-                              minute: "2-digit",
-                            })
-                          : new Date(memory.created_at).toLocaleTimeString([], {
-                              hour: "2-digit",
-                              minute: "2-digit",
-                            })}
+                    <p className="text-sm text-gray-500 flex flex-wrap items-center gap-x-2">
+                      {rowDetail(memory, heading).map((bit) => (
+                        <span key={bit}>{bit}</span>
+                      ))}
                     </p>
                   </li>
                 ))}
