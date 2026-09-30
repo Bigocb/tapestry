@@ -2,17 +2,17 @@
 
 > **Status snapshot** — last reconciled 2026-09-29 against `master` @ `4cb7df2`.
 >
-> **Done (verified by code + tests):** Issues 2, 3, 4, 5, 6, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26
+> **Done (verified by code + tests):** Issues 2, 3, 4, 5, 6, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 28
 > **Partial:** Issue 1 (Postgres is now provisioned, but **the pgvector extension is not installed** — the database has only `plpgsql`; the schema, indexes and cross-DB type decorators are in place), Issue 7 (embeddings work via Ollama with a deterministic local fallback; **similarity is still computed in Python** — no ANN index, because pgvector is absent)
 > **Superseded:** Issue 27 — the deployment target changed. MEMIND runs in Docker Compose with Postgres on the homelab box, published through Traefik and cloudflared at `memory.cloutier.work`. The service is live; the Render-specific acceptance criteria no longer apply.
-> **Not started:** Phase 9, Issues 28–35 (Tellings).
+> **Not started:** Phase 9, Issues 29–35 (Tellings). Issue 28 — the tracer bullet — is done, deployed and verified; Issue 29 is the only HITL slice.
 >
 > **Key deviations from original plan:**
 > - **Storage:** production runs on Postgres 16 in Docker on the homelab box. SQLite (`memind.db`) remains the local-dev default.
 > - **Search:** full-text + semantic ranking done in Python over fetched rows, not Postgres `tsquery`/pgvector ANN.
 > - **Agents:** Ollama Cloud (`ollama.com/v1`, `gemma4:31b`) is primary. Story generation implements a Claude Opus fallback (`ANTHROPIC_API_KEY`), gated on a response-quality check; capture/refinement/enrichment are Ollama-only.
 > - **Transcription:** local `faster-whisper`; Issue 4's backend is wired. A 501 is still returned when the model or its dependency is genuinely unavailable — that is error handling, not the old stub.
-> - **Tests:** 384 passing, 1 skipped (the pgvector extension check); suite runs on in-memory SQLite.
+> - **Tests:** 398 backend passing, 1 skipped (the pgvector extension check) on in-memory SQLite, plus 11 frontend tests via vitest/jsdom.
 > - **Beyond the plan:** first-class entities, the privacy lock, the review queue and fuzzy dates all shipped outside the numbered issues, so this list understates the delivered surface.
 >
 > **Remaining work:** the pgvector half of Issue 1 (and the ANN search it would unblock in Issue 7), Phase 9 (Tellings, Issues 28–35), and active iteration on capture/parsing quality (Issues 4–6 area).
@@ -926,20 +926,33 @@ mode on the capture surface and a review screen.
 
 #### Acceptance criteria
 
-- [ ] Submitting a typed telling stores the transcript and returns the telling
+- [x] Submitting a typed telling stores the transcript and returns the telling
       with one proposed segment
-- [ ] Tellings and segments live in their own tables and are never rows in
+- [x] Tellings and segments live in their own tables and are never rows in
       `memories` before commit
-- [ ] A segment's text, title and summary can be edited before commit
-- [ ] Committing creates one memory per accepted segment, each linked back to
+- [x] A segment's text, title and summary can be edited before commit
+- [x] Committing creates one memory per accepted segment, each linked back to
       its telling
-- [ ] Committed memories sync entities and apply review flags identically to a
+- [x] Committed memories sync entities and apply review flags identically to a
       normal capture
-- [ ] Commit does not re-run the Capture Agent
-- [ ] Before commit, no memory, timeline, review-queue or search response
+- [x] Commit does not re-run the Capture Agent
+- [x] Before commit, no memory, timeline, review-queue or search response
       mentions the telling, and no entity count changes
-- [ ] A telling is visible only to its owner
-- [ ] Tests cover the commit path and the draft-isolation invariant
+- [x] A telling is visible only to its owner
+- [x] Tests cover the commit path and the draft-isolation invariant
+
+> **Status: DONE.** Deployed and verified live. Twelve backend tests
+> (`tests/test_tellings.py`) and eleven frontend tests cover the four
+> endpoints, the commit path, and the draft-isolation invariant — including a
+> companion test proving that invariant is not vacuous. Two extras beyond the
+> brief: an unknown segment status is rejected with a 400, and a second commit
+> is refused with a 409.
+>
+> Deviations: the capture mode is a sibling of `CapturePanel` on the capture
+> page rather than a fourth mode inside it, which avoided modifying working
+> code with no tests. The client-level tests passed as soon as they were
+> written, since the methods already existed by then; they are kept as guards
+> against URL drift.
 
 ---
 
