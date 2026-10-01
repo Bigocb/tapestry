@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { Timeline } from "@/components/Timeline";
@@ -33,7 +33,7 @@ describe("Timeline rows", () => {
     vi.mocked(api.getTimeline).mockResolvedValue([]);
   });
 
-  it("shows who and where rather than a clock time", async () => {
+  it("shows the exact date, and who and where, rather than a clock time", async () => {
     vi.mocked(api.getTimeline).mockResolvedValue([
       memory({
         title: "Lunch",
@@ -46,10 +46,76 @@ describe("Timeline rows", () => {
 
     render(<Timeline />);
 
-    expect(await screen.findByText(/Dawn/)).toBeInTheDocument();
+    // The exact date is the point of the row now.
+    expect(await screen.findByText(/Mar 16, 1995/)).toBeInTheDocument();
+    expect(screen.getByText(/Dawn/)).toBeInTheDocument();
     expect(screen.getByText(/Raleigh/)).toBeInTheDocument();
     // 12:00 AM is the parse default, not a time anyone recorded.
     expect(screen.queryByText(/12:00/)).not.toBeInTheDocument();
+  });
+
+  it("nests a month under its year", async () => {
+    vi.mocked(api.getTimeline).mockResolvedValue([
+      memory({
+        id: "m1",
+        title: "One",
+        event_date: "2024-11-28T00:00:00",
+        date_precision: "exact",
+      }),
+      memory({
+        id: "m2",
+        title: "Two",
+        event_date: "2024-08-03T00:00:00",
+        date_precision: "exact",
+      }),
+    ]);
+
+    render(<Timeline />);
+    await screen.findByText("One");
+
+    expect(screen.getByRole("heading", { level: 2, name: "2024" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { level: 3, name: "November 2024" })
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { level: 3, name: "August 2024" })
+    ).toBeInTheDocument();
+  });
+
+  it("puts a year-only memory under the year, before the months", async () => {
+    vi.mocked(api.getTimeline).mockResolvedValue([
+      memory({
+        id: "m1",
+        title: "Somewhere in the year",
+        event_date: "2024-01-01T00:00:00",
+        date_precision: "year",
+      }),
+      memory({
+        id: "m2",
+        title: "A day",
+        event_date: "2024-11-28T00:00:00",
+        date_precision: "exact",
+      }),
+    ]);
+
+    render(<Timeline />);
+    const year = (await screen.findByRole("heading", {
+      level: 2,
+      name: "2024",
+    })).parentElement as HTMLElement;
+
+    const headings = within(year).getAllByRole("heading");
+    // The year heading, then the memory title link, is loose; the month is a
+    // level-3 heading that must come after.
+    expect(headings[0]).toHaveTextContent("2024");
+    const month = within(year).getByRole("heading", {
+      level: 3,
+      name: "November 2024",
+    });
+    const loose = within(year).getByText("Somewhere in the year");
+    expect(
+      loose.compareDocumentPosition(month) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy();
   });
 
   it("does not call a year-precise memory approximate", async () => {
@@ -64,7 +130,6 @@ describe("Timeline rows", () => {
     render(<Timeline />);
     await screen.findByText("Born");
 
-    // 1976 is year-precise, not approximate — only decades and ranges are.
     expect(screen.queryByText(/approximate/i)).not.toBeInTheDocument();
   });
 
@@ -83,29 +148,32 @@ describe("Timeline rows", () => {
     expect(screen.getByText(/approximate/i)).toBeInTheDocument();
   });
 
-  it("offers a way to jump to a period", async () => {
+  it("puts undated labels in a section after the dated years", async () => {
     vi.mocked(api.getTimeline).mockResolvedValue([
       memory({
         id: "m1",
-        title: "One",
-        event_date: "1976-01-01T00:00:00",
-        date_precision: "year",
+        title: "A day",
+        event_date: "2024-11-28T00:00:00",
+        date_precision: "exact",
       }),
       memory({
         id: "m2",
-        title: "Two",
-        event_date: "2024-01-01T00:00:00",
-        date_precision: "year",
+        title: "No idea when",
+        date_label: "Middle school",
+        event_date: null,
       }),
     ]);
 
     render(<Timeline />);
-    await screen.findByText("One");
+    const year = await screen.findByRole("heading", { level: 2, name: "2024" });
+    const sometime = screen.getByRole("heading", {
+      level: 2,
+      name: "Middle school",
+    });
 
-    // Thirty-four thin years is a long scroll; finding 1976 should not mean
-    // passing twenty of them.
-    const jump = screen.getByRole("link", { name: "1976" });
-    expect(jump).toHaveAttribute("href", "#period-1976");
+    expect(
+      year.compareDocumentPosition(sometime) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy();
   });
 
   it("puts qualified decades under one heading", async () => {
