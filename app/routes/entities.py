@@ -26,7 +26,7 @@ from app.db.entities import (
     undo_split,
     update_entity,
 )
-from app.lookup import search_places
+from app.lookup import address_candidates, search_places
 from app.dependencies import get_current_user
 from app.models.schemas import (
     EntityDetail,
@@ -429,6 +429,49 @@ async def discard_fact(
     await db.commit()
 
 
+@router.get(
+    "/entities/{entity_id}/verify-address",
+    response_model=list[LookupCandidate],
+    summary="Verify an address",
+    description=(
+        "Resolve a free-text address to points on the map, via OpenStreetMap. "
+        "Nothing is stored: the user confirms a candidate and the client saves "
+        "the address and coordinates on the entity. Places only."
+    ),
+)
+async def verify_address(
+    entity_id: UUID,
+    query: str = Query(..., min_length=1, max_length=300),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[LookupCandidate]:
+    """Offer verified addresses for the user to choose between."""
+    entity = await _load_owned_entity(db, str(current_user.id), str(entity_id))
+    if entity is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Entity not found"
+        )
+    if entity.kind != "place":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="An address belongs to a place",
+        )
+
+    return [
+        LookupCandidate(
+            source=match.source,
+            source_id=match.source_id,
+            label=match.label,
+            description=match.description,
+            url=match.url,
+            latitude=match.latitude,
+            longitude=match.longitude,
+            address=match.address,
+        )
+        for match in await address_candidates(query)
+    ]
+
+
 @router.patch(
     "/entities/{entity_id}",
     response_model=EntityDetail,
@@ -457,6 +500,10 @@ async def update_entity_endpoint(
         kwargs["description"] = request.description
     if "address" in fields:
         kwargs["address"] = request.address
+    if "latitude" in fields:
+        kwargs["latitude"] = request.latitude
+    if "longitude" in fields:
+        kwargs["longitude"] = request.longitude
 
     try:
         await update_entity(

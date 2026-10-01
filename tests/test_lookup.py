@@ -155,3 +155,81 @@ class TestFuzzyPlaceMatching:
         matches = await lookup.search_places("Mission Valley Theater")
 
         assert [m.source_id for m in matches] == ["Q999"]
+
+
+NOMINATIM_RESULT = [
+    {
+        "osm_type": "node",
+        "osm_id": 123456,
+        "lat": "39.739236",
+        "lon": "-104.990251",
+        "name": "1201 Larimer Street",
+        "display_name": (
+            "1201 Larimer Street, Denver, Colorado, 80204, United States"
+        ),
+        "type": "house",
+    }
+]
+
+
+class TestAddressVerification:
+    """Verifying an address is a different question from finding a place.
+
+    A place lookup answers "which place is this?". Verifying an address answers
+    "where exactly", and so the answer carries coordinates.
+    """
+
+    @pytest.mark.asyncio
+    async def test_an_address_resolves_with_coordinates(self, monkeypatch):
+        async def fake(query, limit):
+            return NOMINATIM_RESULT
+
+        monkeypatch.setattr(lookup, "_nominatim", fake)
+
+        matches = await lookup.address_candidates("1201 Larimer St, Denver")
+
+        assert matches[0].source == "nominatim"
+        assert matches[0].latitude == pytest.approx(39.739236)
+        assert matches[0].longitude == pytest.approx(-104.990251)
+        assert "Larimer" in matches[0].address
+
+    @pytest.mark.asyncio
+    async def test_the_full_address_line_is_kept(self, monkeypatch):
+        async def fake(query, limit):
+            return NOMINATIM_RESULT
+
+        monkeypatch.setattr(lookup, "_nominatim", fake)
+
+        match = (await lookup.address_candidates("1201 Larimer"))[0]
+
+        assert match.address.startswith("1201 Larimer Street")
+        assert match.url.startswith("https://www.openstreetmap.org/node/")
+
+    @pytest.mark.asyncio
+    async def test_a_blank_query_asks_nobody(self, monkeypatch):
+        called = False
+
+        async def fake(query, limit):
+            nonlocal called
+            called = True
+            return NOMINATIM_RESULT
+
+        monkeypatch.setattr(lookup, "_nominatim", fake)
+
+        assert await lookup.address_candidates("   ") == []
+        assert called is False
+
+    @pytest.mark.asyncio
+    async def test_a_result_without_coordinates_is_ignored(self, monkeypatch):
+        async def fake(query, limit):
+            return [{"osm_type": "node", "osm_id": 1, "display_name": "Nowhere"}]
+
+        monkeypatch.setattr(lookup, "_nominatim", fake)
+
+        assert await lookup.address_candidates("Nowhere") == []
+
+    def test_requests_are_paced_for_nominatim(self):
+        # Their usage policy is at most one request a second, so a burst waits.
+        lookup._last_nominatim_call = 100.0
+        assert lookup._seconds_until_nominatim_slot(100.2) == pytest.approx(0.8)
+        assert lookup._seconds_until_nominatim_slot(101.5) == 0.0

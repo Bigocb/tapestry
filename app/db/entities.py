@@ -81,6 +81,8 @@ async def update_entity(
     canonical_name=_UNSET,
     description=_UNSET,
     address=_UNSET,
+    latitude=_UNSET,
+    longitude=_UNSET,
 ) -> Entity:
     """Edit an entity's name, description or address by hand.
 
@@ -123,6 +125,19 @@ async def update_entity(
             attributes.pop("address", None)
         # Reassign rather than mutate: a JSON column only marks itself dirty on
         # assignment, so an in-place edit would never be saved.
+        entity.attributes = attributes
+
+    if latitude is not _UNSET or longitude is not _UNSET:
+        if entity.kind != "place":
+            raise ValueError("An address belongs to a place")
+        attributes = dict(entity.attributes or {})
+        for key, value in (("lat", latitude), ("lon", longitude)):
+            if value is _UNSET:
+                continue
+            if value is None:
+                attributes.pop(key, None)
+            else:
+                attributes[key] = float(value)
         entity.attributes = attributes
 
     await db.commit()

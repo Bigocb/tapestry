@@ -18,7 +18,9 @@ the wording verbatim misses it, so a name that finds nothing useful is
 broadened by dropping that word and trying again.
 """
 
+import asyncio
 import re
+import time
 from dataclasses import dataclass
 from typing import Optional
 
@@ -26,8 +28,15 @@ import httpx
 
 WIKIDATA_API_URL = "https://www.wikidata.org/w/api.php"
 WIKIDATA_ENTITY_URL = "http://www.wikidata.org/entity/"
+NOMINATIM_API_URL = "https://nominatim.openstreetmap.org/search"
 REQUEST_TIMEOUT_SECONDS = 20.0
 SEARCH_LIMIT = 5
+
+# Nominatim's usage policy allows at most one request a second. A single person
+# clicking "verify" never reaches that, but a burst must still wait rather than
+# get the app blocked.
+NOMINATIM_MIN_INTERVAL_SECONDS = 1.0
+_last_nominatim_call = 0.0
 
 # Generic venue words carry little identifying power, and they are exactly
 # where a name-against-index search fails: Wikidata does not retrieve
@@ -75,6 +84,10 @@ class PlaceMatch:
     label: str
     description: Optional[str]
     url: str
+    # Present only for an address verification: which point on the map this is.
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+    address: Optional[str] = None
 
 
 async def _search(name: str, limit: int) -> list[dict]:
@@ -199,3 +212,86 @@ async def find_place(name: str) -> Optional[PlaceMatch]:
     """The single best match for a place's name, or None if there is none."""
     matches = await search_places(name, limit=1)
     return matches[0] if matches else None
+
+
+def _seconds_until_nominatim_slot(now: float) -> float:
+    """How long to wait before Nominatim may be asked again."""
+    elapsed = now - _last_nominatim_call
+    return max(0.0, NOMINATIM_MIN_INTERVAL_SECONDS - elapsed)
+
+
+async def _nominatim(query: str, limit: int) -> list[dict]:
+    """Ask Nominatim (OpenStreetMap) to resolve a free-text address."""
+    global _last_nominatim_call
+
+    wait = _seconds_until_nominatim_slot(time.monotonic())
+    if wait > 0:
+        await asyncio.sleep(wait)
+    _last_nominatim_call = time.monotonic()
+
+    params = {
+        "q": query,
+        "format": "jsonv2",
+        "addressdetails": "1",
+        "limit": limit,
+    }
+    async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT_SECONDS) as client:
+        response = await client.get(
+            NOMINATIM_API_URL,
+            params=params,
+            headers={"User-Agent": USER_AGENT, "Accept": "application/json"},
+        )
+        response.raise_for_status()
+        return response.json()
+
+
+def _to_address_match(result: dict) -> Optional[PlaceMatch]:
+    """Turn a Nominatim result into a match, or discard it if unusable."""
+    try:
+        latitude = float(result["lat"])
+        longitude = float(result["lon"])
+    except (KeyError, TypeError, ValueError):
+        return None
+
+    osm_type = result.get("osm_type")
+    osm_id = result.get("osm_id")
+    if not osm_type or osm_id is None:
+        return None
+
+    display = result.get("display_name") or ""
+    if not display:
+        return None
+
+    name = result.get("name") or display.split(",")[0].strip()
+
+    return PlaceMatch(
+        source="nominatim",
+        source_id=f"{osm_type}/{osm_id}",
+        label=name,
+        description=None,
+        url=f"https://www.openstreetmap.org/{osm_type}/{osm_id}",
+        latitude=latitude,
+        longitude=longitude,
+        address=display,
+    )
+
+
+async def address_candidates(query: str, limit: int = 3) -> list[PlaceMatch]:
+    """Verified addresses for a free-text query, each with coordinates.
+
+    A different question from ``search_places``: that asks *which place is
+    this*; this asks *where exactly is it*. The answer is a point on the map and
+    a canonical address line, both of which the user confirms before anything is
+    stored on the entity.
+    """
+    if not query or not query.strip():
+        return []
+
+    matches: list[PlaceMatch] = []
+    for result in await _nominatim(query.strip(), max(limit, SEARCH_LIMIT)):
+        match = _to_address_match(result)
+        if match is not None:
+            matches.append(match)
+        if len(matches) >= limit:
+            break
+    return matches

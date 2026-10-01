@@ -15,6 +15,7 @@ from app.main import app
 from app.db import Base, Memory, User, get_db
 from app.db.entities import normalize_name, sync_memory_entities
 from app.db.models import Entity
+from app.lookup import PlaceMatch
 from app.security import hash_password
 
 
@@ -395,3 +396,110 @@ class TestScoping:
         )
 
         assert response.status_code == 404
+
+
+VERIFIED = PlaceMatch(
+    source="nominatim",
+    source_id="node/123456",
+    label="1201 Larimer Street",
+    description=None,
+    url="https://www.openstreetmap.org/node/123456",
+    latitude=39.739236,
+    longitude=-104.990251,
+    address="1201 Larimer Street, Denver, Colorado, 80204, United States",
+)
+
+
+class TestAddressVerification:
+    """Verifying an address answers "where exactly", so it carries coordinates."""
+
+    @pytest.mark.asyncio
+    async def test_verifying_offers_addresses_with_coordinates(
+        self, client, setup_users, get_auth_token, test_db, monkeypatch
+    ):
+        user, _ = await setup_users()
+        token = get_auth_token("alice", "password123")
+        entity_id = await _mentioning(test_db, user.id, "place", "Nonna's")
+
+        async def fake(query, limit=3):
+            return [VERIFIED]
+
+        monkeypatch.setattr("app.routes.entities.address_candidates", fake)
+
+        response = client.get(
+            f"/api/entities/{entity_id}/verify-address",
+            params={"query": "1201 Larimer St Denver"},
+            headers=_auth(token),
+        )
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body[0]["latitude"] == pytest.approx(39.739236)
+        assert body[0]["address"].startswith("1201 Larimer Street")
+
+    @pytest.mark.asyncio
+    async def test_verifying_is_refused_for_a_person(
+        self, client, setup_users, get_auth_token, test_db
+    ):
+        user, _ = await setup_users()
+        token = get_auth_token("alice", "password123")
+        entity_id = await _mentioning(test_db, user.id, "person", "Sarah")
+
+        response = client.get(
+            f"/api/entities/{entity_id}/verify-address",
+            params={"query": "1201 Larimer St"},
+            headers=_auth(token),
+        )
+
+        assert response.status_code == 400
+
+    @pytest.mark.asyncio
+    async def test_saving_an_address_keeps_its_coordinates(
+        self, client, setup_users, get_auth_token, test_db
+    ):
+        user, _ = await setup_users()
+        token = get_auth_token("alice", "password123")
+        entity_id = await _mentioning(test_db, user.id, "place", "Nonna's")
+
+        response = client.patch(
+            f"/api/entities/{entity_id}",
+            json={
+                "address": "1201 Larimer Street, Denver",
+                "latitude": 39.739236,
+                "longitude": -104.990251,
+            },
+            headers=_auth(token),
+        )
+
+        attributes = response.json()["attributes"]
+        assert attributes["address"] == "1201 Larimer Street, Denver"
+        assert attributes["lat"] == pytest.approx(39.739236)
+        assert attributes["lon"] == pytest.approx(-104.990251)
+
+    @pytest.mark.asyncio
+    async def test_clearing_the_address_clears_the_coordinates(
+        self, client, setup_users, get_auth_token, test_db
+    ):
+        user, _ = await setup_users()
+        token = get_auth_token("alice", "password123")
+        entity_id = await _mentioning(test_db, user.id, "place", "Nonna's")
+        client.patch(
+            f"/api/entities/{entity_id}",
+            json={
+                "address": "1201 Larimer Street",
+                "latitude": 39.739236,
+                "longitude": -104.990251,
+            },
+            headers=_auth(token),
+        )
+
+        response = client.patch(
+            f"/api/entities/{entity_id}",
+            json={"address": None, "latitude": None, "longitude": None},
+            headers=_auth(token),
+        )
+
+        attributes = response.json()["attributes"] or {}
+        assert "address" not in attributes
+        assert "lat" not in attributes
+        assert "lon" not in attributes
