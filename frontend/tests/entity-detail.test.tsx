@@ -18,6 +18,7 @@ vi.mock("@/lib/api", () => ({
     keepEntityFact: vi.fn(),
     discardEntityFact: vi.fn(),
     updateEntity: vi.fn(),
+    verifyAddress: vi.fn(),
   },
 }));
 
@@ -246,9 +247,12 @@ describe("EntityDetailView editing the card", () => {
     );
     await user.click(screen.getByRole("button", { name: /^save$/i }));
 
-    // Untouched fields are omitted, not sent back unchanged.
+    // Untouched fields are omitted, not sent back unchanged. The address brings
+    // its coordinates with it, and here there are none to bring.
     expect(api.updateEntity).toHaveBeenCalledWith("e5", {
       address: "1201 Larimer St, Denver",
+      latitude: null,
+      longitude: null,
     });
   });
 
@@ -273,5 +277,56 @@ describe("EntityDetailView editing the card", () => {
     // A person does not have an address; a description is fine.
     expect(screen.queryByLabelText(/^address$/i)).not.toBeInTheDocument();
     expect(screen.getByLabelText(/^description$/i)).toBeInTheDocument();
+  });
+
+  it("verifies an address and saves the coordinates with it", async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.verifyAddress).mockResolvedValue([
+      {
+        source: "nominatim",
+        source_id: "node/123456",
+        label: "1201 Larimer Street",
+        description: null,
+        url: "https://www.openstreetmap.org/node/123456",
+        latitude: 39.739236,
+        longitude: -104.990251,
+        address: "1201 Larimer Street, Denver, Colorado, 80204, United States",
+      },
+    ]);
+    vi.mocked(api.updateEntity).mockResolvedValue(THEATRE);
+
+    render(<EntityDetailView id="e5" />);
+
+    await user.click(await screen.findByRole("button", { name: /^edit$/i }));
+    await user.type(screen.getByLabelText(/^address$/i), "1201 Larimer St");
+    await user.click(screen.getByRole("button", { name: /^verify$/i }));
+
+    // The candidate's canonical address replaces what was typed.
+    await user.click(await screen.findByRole("button", { name: /use this/i }));
+
+    await user.click(screen.getByRole("button", { name: /^save$/i }));
+
+    expect(api.updateEntity).toHaveBeenCalledWith("e5", {
+      address: "1201 Larimer Street, Denver, Colorado, 80204, United States",
+      latitude: 39.739236,
+      longitude: -104.990251,
+    });
+  });
+
+  it("does not invent coordinates when none were verified", async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.updateEntity).mockResolvedValue(THEATRE);
+
+    render(<EntityDetailView id="e5" />);
+
+    await user.click(await screen.findByRole("button", { name: /^edit$/i }));
+    await user.type(screen.getByLabelText(/^address$/i), "somewhere I typed");
+    await user.click(screen.getByRole("button", { name: /^save$/i }));
+
+    expect(api.updateEntity).toHaveBeenCalledWith("e5", {
+      address: "somewhere I typed",
+      latitude: null,
+      longitude: null,
+    });
   });
 });

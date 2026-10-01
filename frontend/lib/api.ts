@@ -192,6 +192,10 @@ export interface LookupCandidate {
   label: string;
   description?: string | null;
   url: string;
+  // Present only for an address verification.
+  latitude?: number | null;
+  longitude?: number | null;
+  address?: string | null;
 }
 
 export interface EntityFact {
@@ -381,8 +385,19 @@ export const api = {
       canonical_name?: string;
       description?: string | null;
       address?: string | null;
+      latitude?: number | null;
+      longitude?: number | null;
     }
   ) => request("PATCH", `/entities/${id}`, changes) as Promise<EntityDetail>,
+  // Verified addresses for a place, via OpenStreetMap. Nothing is stored until
+  // the user confirms one and it is saved on the entity.
+  verifyAddress: (id: string, query: string) =>
+    request(
+      "GET",
+      `/entities/${id}/verify-address`,
+      undefined,
+      { query }
+    ) as Promise<LookupCandidate[]>,
   getMergeSuggestions: () => request("GET", "/entities/merge-suggestions"),
   mergeEntities: (source_id: string, target_id: string) =>
     request("POST", "/entities/merge", { source_id, target_id }),

@@ -47,6 +47,10 @@ interface LookupCandidate {
   label: string;
   description?: string | null;
   url: string;
+  // Present only for an address verification, which resolves to a point.
+  latitude?: number | null;
+  longitude?: number | null;
+  address?: string | null;
 }
 
 interface EntitySummaryBase {
@@ -112,13 +116,36 @@ export function EntityDetailView({ id }: { id: string }) {
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [address, setAddress] = useState("");
+  const [verified, setVerified] = useState<LookupCandidate[]>([]);
+  const [chosen, setChosen] = useState<LookupCandidate | null>(null);
+  const [verifying, setVerifying] = useState(false);
 
   const startEditing = () => {
     if (!entity) return;
     setName(entity.canonical_name);
     setDescription(entity.description ?? "");
     setAddress(addressOf(entity));
+    setVerified([]);
+    setChosen(null);
     setEditing(true);
+  };
+
+  const verifyAddress = async () => {
+    if (!entity || !address.trim()) return;
+    setVerifying(true);
+    try {
+      setVerified(await api.verifyAddress(entity.id, address.trim()));
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Could not verify that");
+    } finally {
+      setVerifying(false);
+    }
+  };
+
+  const useAddress = (candidate: LookupCandidate) => {
+    setAddress(candidate.address ?? candidate.label);
+    setChosen(candidate);
+    setVerified([]);
   };
 
   const saveEdits = async () => {
@@ -127,6 +154,8 @@ export function EntityDetailView({ id }: { id: string }) {
       canonical_name?: string;
       description?: string | null;
       address?: string | null;
+      latitude?: number | null;
+      longitude?: number | null;
     } = {};
 
     // Only send what actually changed: an omitted field is left alone, and a
@@ -137,11 +166,11 @@ export function EntityDetailView({ id }: { id: string }) {
     if (description.trim() !== (entity.description ?? "")) {
       changes.description = description.trim() || null;
     }
-    if (
-      entity.kind === "place" &&
-      address.trim() !== addressOf(entity)
-    ) {
+    if (entity.kind === "place" && address.trim() !== addressOf(entity)) {
       changes.address = address.trim() || null;
+      // Coordinates only travel with the address they were verified against.
+      changes.latitude = chosen?.latitude ?? null;
+      changes.longitude = chosen?.longitude ?? null;
     }
 
     if (Object.keys(changes).length === 0) {
@@ -465,15 +494,61 @@ export function EntityDetailView({ id }: { id: string }) {
               />
             </label>
             {entity.kind === "place" && (
-              <label className="block">
+              <div>
                 <span className="stamp text-ink-faint">Address</span>
-                <input
-                  aria-label="Address"
-                  className={`${fieldClass} w-full mt-1`}
-                  value={address}
-                  onChange={(event) => setAddress(event.target.value)}
-                />
-              </label>
+                <div className="flex gap-2 mt-1">
+                  <input
+                    aria-label="Address"
+                    className={`${fieldClass} flex-1 min-w-0`}
+                    value={address}
+                    onChange={(event) => {
+                      setAddress(event.target.value);
+                      setChosen(null);
+                    }}
+                  />
+                  <button
+                    type="button"
+                    onClick={verifyAddress}
+                    disabled={verifying || !address.trim()}
+                    className={`${btnOutline} shrink-0`}
+                  >
+                    {verifying ? "Verifying…" : "Verify"}
+                  </button>
+                </div>
+                {chosen && (
+                  <p className="stamp text-mint mt-1.5">
+                    Verified · {chosen.latitude?.toFixed(5)},{" "}
+                    {chosen.longitude?.toFixed(5)}
+                  </p>
+                )}
+                {verified.length > 0 && (
+                  <ul className="mt-2 space-y-1.5">
+                    {verified.map((candidate) => (
+                      <li
+                        key={candidate.source_id}
+                        className="flex items-start justify-between gap-3 text-sm border border-line rounded-lg p-2.5"
+                      >
+                        <span className="text-ink-muted min-w-0">
+                          {candidate.address ?? candidate.label}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => useAddress(candidate)}
+                          className="text-flash underline shrink-0 text-xs font-semibold"
+                        >
+                          Use this
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                {verified.length === 0 && !verifying && !chosen && address.trim() && (
+                  <p className="stamp text-ink-faint mt-1.5 normal-case tracking-normal">
+                    Verified against OpenStreetMap. Nothing is saved until you
+                    press Save.
+                  </p>
+                )}
+              </div>
             )}
             <div className="flex gap-2">
               <button
