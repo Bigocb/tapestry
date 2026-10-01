@@ -167,60 +167,108 @@ function hasNameWord(label: string): boolean {
   );
 }
 
-export function periodOf(memory: DatedMemory): TimelinePeriod {
-  const precision = memory.date_precision ?? null;
-  const label = (memory.date_label ?? "").trim();
-  const date = memory.event_date ? new Date(memory.event_date) : null;
-  const end = memory.event_date_end ? new Date(memory.event_date_end) : null;
-  const startYear = date ? date.getFullYear() : null;
-  const endYear = end ? end.getFullYear() : null;
-  const base = label.replace(/\s*\([^)]*\)\s*$/, "").trim();
+function firstYearIn(label: string): number | null {
+  const match = label.match(/\b(?:18|19|20)\d{2}\b/);
+  return match ? Number(match[0]) : null;
+}
 
-  // A range written into the label itself: "Middle school (1987-1990)".
-  const stated = label.match(
-    /\b((?:18|19|20)\d{2})\s*[-–—]\s*((?:18|19|20)\d{2})\b/
+const MONTH_INDEX: Record<string, number> = {
+  january: 1, february: 2, march: 3, april: 4, may: 5, june: 6,
+  july: 7, august: 8, september: 9, october: 10, november: 11, december: 12,
+};
+
+/**
+ * A period a label names outright: "September 2000", "1988", "the 1980s",
+ * "1987-1990".
+ *
+ * The label is the most reliable thing a memory carries about its own date. The
+ * precision column is the model's guess and is routinely wrong — "September
+ * 2000" stored as a range, "1988" as unknown — so the wording is read first and
+ * the precision is only a fallback.
+ */
+function parseLabelPeriod(label: string): TimelinePeriod | null {
+  const text = label.trim();
+  if (!text) return null;
+
+  const range = text.match(
+    /^((?:18|19|20)\d{2})\s*[-–—]\s*((?:18|19|20)\d{2})$/
   );
-  if (stated) {
-    const from = Number(stated[1]);
-    const to = Number(stated[2]);
-    if (hasNameWord(label)) return namedPeriod(base, from);
-    return rangePeriod(from, to);
+  if (range) return rangePeriod(Number(range[1]), Number(range[2]));
+
+  // A whole date written out, however it was stored. The month is what the
+  // timeline groups by; the day is shown on the row.
+  const written = text.match(
+    /^([A-Za-z]+)\s+(\d{1,2})(?:st|nd|rd|th)?,?\s+((?:18|19|20)\d{2})$/
+  );
+  if (written) {
+    const index = MONTH_INDEX[written[1].toLowerCase()];
+    if (index) return monthPeriod(Number(written[3]), index);
+  }
+  const numeric = text.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (numeric) {
+    return monthPeriod(Number(numeric[3]), Number(numeric[1]));
+  }
+  const iso = text.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (iso) {
+    return monthPeriod(Number(iso[1]), Number(iso[2]));
   }
 
-  if (precision === "range") {
-    if (startYear !== null && endYear !== null && endYear > startYear) {
-      return hasNameWord(label)
-        ? namedPeriod(base, startYear)
-        : rangePeriod(startYear, endYear);
-    }
-    if (startYear !== null) {
-      // Open-ended: one year, so it clusters by decade rather than claiming the
-      // second year it does not have.
-      return hasNameWord(label)
-        ? namedPeriod(base, startYear)
-        : decadePeriod(decadeStart(startYear));
-    }
-    if (label) return namedPeriod(base, null);
+  const month = text.match(/^([A-Za-z]+)\s+((?:18|19|20)\d{2})$/);
+  if (month) {
+    const index = MONTH_INDEX[month[1].toLowerCase()];
+    if (index) return monthPeriod(Number(month[2]), index);
   }
 
-  // A decade, whether the wording is the user's or the parser's.
-  const decade = decadeOfLabel(label);
+  const decade = decadeOfLabel(text);
   if (decade !== null) return decadePeriod(decade);
-  if (precision === "decade" && date) return decadePeriod(decadeStart(startYear!));
 
-  // The year spine. A month or a day means it belongs in a month as well.
+  const year = text.match(/^((?:18|19|20)\d{2})$/);
+  if (year) return yearPeriod(Number(year[1]));
+
+  return null;
+}
+
+export function periodOf(memory: DatedMemory): TimelinePeriod {
+  const label = (memory.date_label ?? "").trim();
+  const base = label.replace(/\s*\([^)]*\)\s*$/, "").trim();
+  const precision = memory.date_precision ?? null;
+  const date = memory.event_date ? new Date(memory.event_date) : null;
+
+  // 1. The wording, when it names a period.
+  const fromLabel = parseLabelPeriod(label);
+  if (fromLabel) return fromLabel;
+
+  // 2. A name that is not a period ("Middle school", "The Disney trip"). Its
+  //    years, if any, place it among the years rather than in Sometime.
+  if (label && hasNameWord(label)) return namedPeriod(base, firstYearIn(label));
+
+  // 3. The date itself. A day other than the 1st is a real day, so the memory
+  //    belongs in that month whatever the precision says — a decade stored as
+  //    "1988-09-17" is a day, not a decade.
   if (date) {
-    if (precision === "month" || precision === "exact") {
-      return monthPeriod(startYear!, date.getMonth() + 1);
+    const year = date.getFullYear();
+    if (date.getDate() !== 1) return monthPeriod(year, date.getMonth() + 1);
+
+    // A 1st is a placeholder: month, year, decade and range all store one.
+    if (precision === "range") {
+      const end = memory.event_date_end ? new Date(memory.event_date_end) : null;
+      if (end && end.getFullYear() > year) {
+        return rangePeriod(year, end.getFullYear());
+      }
+      return decadePeriod(decadeStart(year));
     }
-    return yearPeriod(startYear!);
+    if (precision === "decade") return decadePeriod(decadeStart(year));
+    if (precision === "month" || precision === "exact") {
+      return monthPeriod(year, date.getMonth() + 1);
+    }
+    return yearPeriod(year);
   }
 
-  // A label with no anchor date: a real answer, just not a dated one.
+  // 4. A label with no period and no date: a real answer, just not a dated one.
   if (label) return namedPeriod(base, null);
 
-  // Nothing but a capture time. The timeline normally hides these; a caller who
-  // passes one through gets a year rather than an empty heading.
+  // 5. Nothing but a capture time. The timeline normally hides these; a caller
+  //    who passes one through gets a year rather than an empty heading.
   if (memory.created_at) {
     return yearPeriod(new Date(memory.created_at).getFullYear());
   }

@@ -81,6 +81,73 @@ describe("periodOf", () => {
   });
 });
 
+describe("periodOf trusts the wording over the precision", () => {
+  it("puts a label of September 2000 in that month, whatever the precision says", () => {
+    // Stored as a range with no date; the wording is the truth.
+    const period = periodOf(
+      dated({ date_label: "September 2000", date_precision: "range" })
+    );
+
+    expect(period.kind).toBe("month");
+    expect(period.key).toBe("2000-09");
+    expect(period.group).toBe("2000");
+  });
+
+  it("puts a bare year label on the year, not in Sometime", () => {
+    const period = periodOf(
+      dated({ date_label: "1988", date_precision: "unknown", event_date: null })
+    );
+
+    expect(period.kind).toBe("year");
+    expect(period.key).toBe("1988");
+  });
+
+  it("puts a bare year label on the year even when stored as a range", () => {
+    const period = periodOf(
+      dated({
+        date_label: "1985",
+        date_precision: "range",
+        event_date: "1985-01-01T00:00:00",
+      })
+    );
+
+    expect(period.kind).toBe("year");
+    expect(period.key).toBe("1985");
+  });
+
+  it("treats a real day as that day even when the precision says decade", () => {
+    // 1988-09-17 is a day; a decade is stored on 1 Jan.
+    const period = periodOf(
+      dated({ event_date: "1988-09-17T00:00:00", date_precision: "decade" })
+    );
+
+    expect(period.kind).toBe("month");
+    expect(period.key).toBe("1988-09");
+  });
+
+  it("reads a full date written into the label", () => {
+    const period = periodOf(dated({ date_label: "September 29, 1997" }));
+
+    expect(period.kind).toBe("month");
+    expect(period.key).toBe("1997-09");
+  });
+
+  it("reads a slash date written into the label", () => {
+    const period = periodOf(dated({ date_label: "2/18/1999" }));
+
+    expect(period.kind).toBe("month");
+    expect(period.key).toBe("1999-02");
+  });
+
+  it("keeps a name that merely mentions a year as its own period", () => {
+    // The 1985 is inside a name, so it is placed by that year but stays named.
+    const period = periodOf(dated({ date_label: "The 1985 Plymouth" }));
+
+    expect(period.kind).toBe("label");
+    expect(period.sort).toBe("1985-01-01");
+  });
+});
+
 describe("buildTimeline", () => {
   it("nests months under their year, newest first", () => {
     const sections = buildTimeline([
