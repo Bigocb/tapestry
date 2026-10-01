@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 
 from sqlalchemy import inspect, text
-from datetime import timezone
+from datetime import datetime, timezone
 
 # Import routes
 from app.routes import (
@@ -249,25 +249,28 @@ async def _apply_pending_migrations() -> None:
 
 
 async def _backfill_fuzzy_metadata() -> None:
-    """Re-derive date precision/label for memories captured before fuzzy dates.
+    """Re-derive date precision/label for memories captured before precision.
 
-    Memories processed by the early pipeline could carry an event_date with no
-    precision or label, so "the 80s" ended up as a bare 1980-01-01 that the
-    timeline cannot group. Re-resolve the raw text for those rows and backfill
-    precision, range end and label where the resolver finds something fuzzy.
-    Only fills blanks -- never overwrites an explicit value.
+    Memories processed by the early pipeline carry an event_date with no
+    precision or label. The timeline needs both to place a memory: without a
+    precision it cannot tell a day from a month from a year, and "the 80s" ended
+    up as a bare 1980-01-01 it cannot group at all.
+
+    Re-resolve the raw text for those rows. A fuzzy answer (decade, range) wins
+    when the resolver finds one, because it carries a label the user will want;
+    otherwise the stored date's own shape says how precise it was. Only blanks
+    are filled -- an explicit value is never overwritten.
     """
-    from app.agents.capture import resolve_date
+    from app.agents.capture import _precision_from_stored_date, resolve_date
     from app.db import AsyncSessionLocal
 
     async with AsyncSessionLocal() as session:
         pending = (
             await session.execute(
                 text(
-                    "SELECT id, raw_input FROM memories "
+                    "SELECT id, raw_input, event_date FROM memories "
                     "WHERE event_date IS NOT NULL "
-                    "AND (date_precision IS NULL OR date_precision = '') "
-                    "AND (date_label IS NULL OR date_label = '')"
+                    "AND (date_precision IS NULL OR date_precision = '')"
                 )
             )
         ).fetchall()
@@ -276,38 +279,49 @@ async def _backfill_fuzzy_metadata() -> None:
             return
 
         updated = 0
-        for memory_id, raw_input in pending:
-            # Never touch a precision the user set deliberately; only fill
-            # rows that predate fuzzy metadata entirely.
-            resolved = resolve_date(raw_input or "")
-            # Only fuzzy answers improve a bare exact-date row; a plain
-            # resolved date that matches what is already stored adds nothing.
-            if resolved.precision not in ("decade", "range"):
-                continue
-            if not resolved.event_date:
-                continue
+        for memory_id, raw_input, stored_date in pending:
+            # A raw SQL read can hand back a string on some drivers; the
+            # precision guess needs a datetime.
+            if isinstance(stored_date, str):
+                try:
+                    stored_date = datetime.fromisoformat(
+                        stored_date.replace("Z", "+00:00")
+                    )
+                except ValueError:
+                    stored_date = None
 
-            if resolved.label:
+            resolved = resolve_date(raw_input or "")
+
+            if resolved.precision in ("decade", "range") and resolved.event_date:
+                precision = resolved.precision
                 label = resolved.label
-            elif resolved.precision == "decade":
-                label = f"{resolved.event_date.year}s"
+                if not label and precision == "decade":
+                    label = f"{resolved.event_date.year}s"
+                elif not label:
+                    label = f"{resolved.event_date.year}"
+                    if resolved.event_date_end:
+                        label += f"-{resolved.event_date_end.year}"
+                end = resolved.event_date_end
+            elif stored_date is not None:
+                # No fuzzy wording. The stored date's shape is the only clue
+                # left, and it is enough to sit the memory on the timeline.
+                precision = _precision_from_stored_date(stored_date)
+                label = None
+                end = None
             else:
-                label = f"{resolved.event_date.year}"
-                if resolved.event_date_end:
-                    label += f"-{resolved.event_date_end.year}"
+                continue
 
             await session.execute(
                 text(
                     "UPDATE memories SET date_precision = :p, "
-                    "event_date_end = :e, date_label = :l WHERE id = :i"
+                    "event_date_end = COALESCE(event_date_end, :e), "
+                    "date_label = COALESCE(date_label, :l) WHERE id = :i"
                 ),
                 {
-                    "p": resolved.precision,
+                    "p": precision,
                     "e": (
-                        resolved.event_date_end.astimezone(timezone.utc).replace(
-                            tzinfo=None
-                        )
-                        if resolved.event_date_end
+                        end.astimezone(timezone.utc).replace(tzinfo=None)
+                        if end
                         else None
                     ),
                     "l": label[:120] if label else None,
@@ -319,8 +333,8 @@ async def _backfill_fuzzy_metadata() -> None:
         await session.commit()
         if updated:
             print(
-                f"Backfilled fuzzy date metadata for {updated} memories "
-                "(decade/range precision and labels)."
+                f"Backfilled date precision for {updated} memories "
+                "(exact/month/year/decade/range and labels)."
             )
 
 

@@ -457,6 +457,21 @@ def _precise_date_precision(raw_input: str) -> str:
     return "exact"
 
 
+def _precision_from_stored_date(stored: datetime) -> str:
+    """Guess how precise a stored date was, for a row that predates precision.
+
+    A date alone cannot say whether someone meant a day, a month or a year, but
+    the placeholder it was stored as gives it away: a bare year lands on 1 Jan,
+    a bare month on the 1st, and a real day on the day. Used only to backfill
+    old rows — new captures set their precision from the text.
+    """
+    if stored.day != 1:
+        return "exact"
+    if stored.month == 1:
+        return "year"
+    return "month"
+
+
 def resolve_date(raw_input: str) -> ResolvedDate:
     """Resolve the best available date information from raw text.
 
