@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.crypto import encrypt
 from app.db import LLMSetting, User, get_db
 from app.dependencies import get_current_user
-from app.llm_config import EMBEDDING_ROLE, ROLES, env_default
+from app.llm_config import ROLES, env_default
 from app.models.schemas import LLMProviderSetting, LLMProviderSettingUpdate
 
 router = APIRouter(prefix="/settings", tags=["settings"])
@@ -32,7 +32,6 @@ def _as_response(role: str, row: LLMSetting | None) -> LLMProviderSetting:
         model=(row.model if row and row.model else default.model),
         api_base=(row.api_base if row and row.api_base else default.api_base),
         has_api_key=bool(row and row.api_key_encrypted) or env_key_applies,
-        locked_model=role == EMBEDDING_ROLE,
     )
 
 
@@ -80,15 +79,6 @@ async def set_llm_setting(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Unknown role '{role}'.",
-        )
-
-    if role == EMBEDDING_ROLE and payload.model:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=(
-                "The embedding model cannot be changed: every stored vector was "
-                "made by one model, and another would not compare against them."
-            ),
         )
 
     result = await db.execute(

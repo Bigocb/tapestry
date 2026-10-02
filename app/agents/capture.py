@@ -107,51 +107,23 @@ def _ollama_config() -> tuple[str, str, Optional[str]]:
 async def _call_ollama_chat(
     prompt: str, system_prompt: str = CAPTURE_SYSTEM_PROMPT
 ) -> dict:
-    """Call the Ollama Chat API and return the raw message content as a dict.
+    """Run the capture prompt through the configured provider.
 
     ``system_prompt`` defaults to the capture instructions; other agents in the
     capture family pass their own through the same plumbing.
 
-    Raises RuntimeError on network or parsing failures so the caller can fall back.
+    Raises on any failure so the caller can fall back to its deterministic path.
     """
-    api_base, model, api_key = _ollama_config()
-    # Support both https://ollama.com/v1 and http://localhost:11434 style bases.
-    if api_base.endswith("/v1"):
-        url = f"{api_base}/chat/completions"
-    else:
-        url = f"{api_base}/v1/chat/completions"
+    from app.agents import llm
 
-    headers = {
-        "Content-Type": "application/json",
-        "Accept": "application/json",
-    }
-    if api_key:
-        headers["Authorization"] = f"Bearer {api_key}"
-
-    payload = {
-        "model": model,
-        "messages": [
+    config = await llm.config_for_role("capture")
+    return await llm.chat_json(
+        config,
+        [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": prompt},
         ],
-        "response_format": {"type": "json_object"},
-        "stream": False,
-    }
-
-    async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT_SECONDS) as client:
-        response = await client.post(url, headers=headers, json=payload)
-        response.raise_for_status()
-        data = response.json()
-
-    content = data["choices"][0]["message"]["content"]
-    # Some models wrap JSON in markdown fences; strip them.
-    content = content.strip()
-    if content.startswith("```"):
-        content = content.split("\n", 1)[1]
-    if content.endswith("```"):
-        content = content.rsplit("\n", 1)[0]
-    content = content.strip()
-    return json.loads(content)
+    )
 
 
 def _is_sentence_start(text: str, start: int) -> bool:

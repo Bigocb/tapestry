@@ -691,10 +691,6 @@ class LLMProviderSetting(BaseModel):
     model: str
     api_base: Optional[str] = None
     has_api_key: bool = False
-    # True for embeddings, whose model is fixed until re-embedding exists.
-    # Named "locked_model" rather than "model_locked": Pydantic reserves the
-    # "model_" prefix for its own methods.
-    locked_model: bool = False
 
 
 class LLMProviderSettingUpdate(BaseModel):

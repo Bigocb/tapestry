@@ -10,6 +10,7 @@ from uuid import UUID
 
 from app.db import get_db, Memory, Story, User
 from app.models.schemas import StoryGenerate, StoryResponse, StoryExport
+from app.agents import llm
 from app.agents.story import generate_story
 from app.dependencies import get_current_user
 
@@ -98,11 +99,12 @@ async def generate_story_endpoint(
     )
 
     memory_contexts = [_memory_to_story_context(memory) for memory in memories]
-    narrative = await generate_story(
-        story_type=request.story_type,
-        memories=memory_contexts,
-        custom_prompt=request.custom_prompt,
-    )
+    async with llm.using(db, str(current_user.id), "story"):
+        narrative = await generate_story(
+            story_type=request.story_type,
+            memories=memory_contexts,
+            custom_prompt=request.custom_prompt,
+        )
 
     # Derive a title from the first heading of the narrative if present.
     title = request.story_type.replace("_", " ").title()

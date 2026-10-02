@@ -28,6 +28,7 @@ from app.agents.embeddings import (
     generate_embedding,
     serialize_embedding,
 )
+from app.agents import llm
 from app.agents.enrichment import enrich_memory
 from app.agents.refinement import refine_memory
 
@@ -81,6 +82,8 @@ async def _generate_embedding_for_memory(memory: Memory) -> None:
         searchable_parts = [memory.raw_input]
 
     searchable_text = " ".join(part for part in searchable_parts if part).strip()
+    # Embeddings stay on the environment model: every stored vector was made by
+    # one model, and a different one would not compare against them.
     embedding = await generate_embedding(searchable_text)
     memory.embedding = serialize_embedding(embedding) if embedding else None
 
@@ -142,11 +145,13 @@ async def _run_refinement(memory: Memory, db: AsyncSession) -> None:
         user_id=str(memory.user_id),
         exclude_memory_id=str(memory.id),
     )
-    refined = await refine_memory(
-        raw_input=memory.raw_input,
-        structured_content=memory.structured_content or {},
-        recent_memories=recent_memories,
-    )
+    # Use the owner's provider and key, not the environment's.
+    async with llm.using(db, str(memory.user_id), "refinement"):
+        refined = await refine_memory(
+            raw_input=memory.raw_input,
+            structured_content=memory.structured_content or {},
+            recent_memories=recent_memories,
+        )
 
     memory.structured_content = refined.model_dump(mode="json")
     memory.mood = refined.mood
@@ -174,10 +179,11 @@ async def _run_enrichment(memory: Memory, db: AsyncSession) -> None:
         limit=5,
     )
 
-    enriched, related_ids = await enrich_memory(
-        memory=memory.structured_content or {},
-        similar_memories=similar_memories,
-    )
+    async with llm.using(db, str(memory.user_id), "enrichment"):
+        enriched, related_ids = await enrich_memory(
+            memory=memory.structured_content or {},
+            similar_memories=similar_memories,
+        )
 
     memory.structured_content = enriched.model_dump(mode="json")
     memory.mood = enriched.mood

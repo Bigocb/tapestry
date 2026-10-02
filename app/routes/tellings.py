@@ -21,6 +21,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.agents import llm
 from app.agents.telling import SegmentationResult, segment_transcript
 from app.db import get_db, Memory, Telling, TellingSegment, User
 from app.db.entities import sync_memory_entities
@@ -92,7 +93,8 @@ async def _process_voice_telling(
             telling.status = SEGMENTING
             await db.flush()
 
-            proposed = await segment_transcript(telling.raw_transcript)
+            async with llm.using(db, user_id, "telling"):
+                proposed = await segment_transcript(telling.raw_transcript)
             _store_segments(db, telling, user_id, proposed)
             telling.status = DRAFT
             telling.error = None
@@ -181,7 +183,9 @@ async def capture_telling(
 
     # Split once, on the way in. Commit must not re-run this: the reviewed
     # content on each segment is authoritative.
-    proposed = await segment_transcript(payload.raw_transcript)
+    # Segment with the owner's telling provider and key.
+    async with llm.using(db, str(current_user.id), "telling"):
+        proposed = await segment_transcript(payload.raw_transcript)
     _store_segments(db, telling, current_user.id, proposed)
     await db.commit()
 
@@ -215,11 +219,12 @@ async def update_telling_transcript(
         await db.delete(segment)
     await db.flush()
 
-    proposed = await segment_transcript(payload.raw_transcript)
+    async with llm.using(db, str(current_user.id), "telling"):
+        proposed = await segment_transcript(payload.raw_transcript)
     _store_segments(db, telling, current_user.id, proposed)
     await db.commit()
 
-    return _telling_response(await _load_telling(db, current_user.id, telling_id))
+    return _telling_response(await _load_telling(db, str(current_user.id), telling_id))
 
 
 @router.get(

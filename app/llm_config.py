@@ -18,8 +18,9 @@ from typing import Optional
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-# The agent roles a user can configure. ``embedding`` is here so its key can be
-# set, but its model is locked (see ``EMBEDDING_ROLE``).
+# The agent roles a user can configure. Embeddings are deliberately absent:
+# every stored vector was made by one model, so pointing them elsewhere would
+# silently break search rather than improve it. They stay on the environment.
 ROLES = (
     "capture",
     "refinement",
@@ -27,7 +28,6 @@ ROLES = (
     "search",
     "telling",
     "story",
-    "embedding",
 )
 EMBEDDING_ROLE = "embedding"
 
@@ -109,12 +109,14 @@ async def resolve(db: AsyncSession, user_id: str, role: str) -> LLMConfig:
             # the caller degrades to its deterministic fallback.
             own_key = None
 
-    # The env key belongs to the env provider. Carrying an Ollama key into a
-    # user's OpenAI config would fail authentication in a confusing way, so it
-    # only applies when the provider is still the env one.
+    # The env key and base both belong to the env provider. Carrying an Ollama
+    # key or endpoint into a user's OpenAI config would send the request to the
+    # wrong host and fail confusingly, so neither is inherited once the provider
+    # changes; the adapter supplies the new provider's default instead.
+    same_provider = provider == base.provider
     if own_key:
         api_key = own_key
-    elif provider == base.provider:
+    elif same_provider:
         api_key = base.api_key
     else:
         api_key = None
@@ -123,6 +125,6 @@ async def resolve(db: AsyncSession, user_id: str, role: str) -> LLMConfig:
         role=role,
         provider=provider,
         model=row.model or base.model,
-        api_base=row.api_base or base.api_base,
+        api_base=row.api_base or (base.api_base if same_provider else None),
         api_key=api_key,
     )

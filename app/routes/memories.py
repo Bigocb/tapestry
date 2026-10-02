@@ -25,6 +25,7 @@ import uuid
 
 from app.db import get_db, Memory, User, as_utc
 from app.db.memory_writes import apply_memory_date_fields, apply_review_flags
+from app.agents import llm
 from app.agents.capture import structure_memory
 from app.agents.embeddings import (
     cosine_similarity,
@@ -383,7 +384,9 @@ async def _structure_and_update_memory(
     User-provided metadata wins over agent output. The row is refreshed before
     this call, so the session already contains the latest state.
     """
-    structured = await structure_memory(memory.raw_input)
+    # Use this user's provider and key for the capture role.
+    async with llm.using(db, str(memory.user_id), "capture"):
+        structured = await structure_memory(memory.raw_input)
 
     # User-provided values take precedence.
     if override_mood:
@@ -772,7 +775,8 @@ async def search_memories_natural(
     unlocked_ids: set[str] = Depends(get_unlocked_memory_ids),
 ) -> SearchResponse:
     """Parse natural language into SearchQuery, then perform hybrid search."""
-    search_query = await parse_search_query(query)
+    async with llm.using(db, str(current_user.id), "search"):
+        search_query = await parse_search_query(query)
     # Override pagination params from URL if provided.
     search_query.limit = max(1, min(100, limit))
     search_query.offset = max(0, offset)

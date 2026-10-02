@@ -18,7 +18,6 @@ from typing import Optional
 from app.agents.capture import (
     ResolvedDate,
     _build_structured_memory,
-    _call_ollama_chat,
     structure_memory,
 )
 from app.agents.telling_dates import (
@@ -264,6 +263,26 @@ async def _fallback_segment(transcript: str) -> ProposedSegment:
     """
     return ProposedSegment(
         text=transcript, structured=await structure_memory(transcript)
+    )
+
+
+async def _call_ollama_chat(
+    prompt: str, system_prompt: str
+) -> dict:
+    """Run the segmentation prompt through the telling role's provider.
+
+    An agent with its own name because telling is its own role: a user can point
+    it at a model with a longer context than capture, which is what a whole
+    recounting needs.
+    """
+    from app.agents import llm
+
+    return await llm.chat_json(
+        await llm.config_for_role("telling"),
+        [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": prompt},
+        ],
     )
 
 

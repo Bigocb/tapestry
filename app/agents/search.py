@@ -50,31 +50,10 @@ def _ollama_config() -> tuple[str, str, Optional[str]]:
 
 
 async def _call_ollama_chat(messages: list[dict[str, str]]) -> dict:
-    """Call the Ollama Chat API and return the parsed JSON content."""
-    api_base, model, api_key = _ollama_config()
-    url = f"{api_base}/v1/chat/completions"
+    """Run the search prompt through the configured provider."""
+    from app.agents import llm
 
-    headers = {
-        "Content-Type": "application/json",
-        "Accept": "application/json",
-    }
-    if api_key:
-        headers["Authorization"] = f"Bearer {api_key}"
-
-    payload = {
-        "model": model,
-        "messages": messages,
-        "response_format": {"type": "json_object"},
-        "stream": False,
-    }
-
-    async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT_SECONDS) as client:
-        response = await client.post(url, headers=headers, json=payload)
-        response.raise_for_status()
-        data = response.json()
-
-    content = data["choices"][0]["message"]["content"]
-    return json.loads(content)
+    return await llm.chat_json(await llm.config_for_role("search"), messages)
 
 
 def _parse_iso_datetime(value: Optional[str]) -> Optional[datetime]:

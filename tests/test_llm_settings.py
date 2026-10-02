@@ -136,7 +136,7 @@ class TestSettingAModel:
         entries = client.get("/api/settings/llm", headers=headers).json()
 
         roles = {entry["role"] for entry in entries}
-        assert {"capture", "refinement", "search", "story", "embedding"} <= roles
+        assert {"capture", "refinement", "search", "story"} <= roles
 
     @pytest.mark.asyncio
     async def test_an_unknown_role_is_refused(self, client, setup_users, auth):
@@ -228,6 +228,68 @@ class TestKeysAreSecret:
         assert _by_role(entries, "capture")["has_api_key"] is False
 
 
+class TestSettingsTakeEffect:
+    @pytest.mark.asyncio
+    async def test_a_saved_model_and_key_reach_the_agent_call(
+        self, client, setup_users, auth, test_db, monkeypatch
+    ):
+        """The whole chain: saved setting -> resolve -> agent call.
+
+        Without this, the settings would be stored but inert, which is the
+        failure that matters most here.
+        """
+        alice, _ = await setup_users()
+        headers = auth("alice", "password123")
+        client.put(
+            "/api/settings/llm/capture",
+            json={
+                "provider": "openai",
+                "model": "gpt-4o-mini",
+                "api_key": "sk-alice",
+            },
+            headers=headers,
+        )
+
+        from app.agents import llm
+
+        seen = {}
+
+        async def fake_post(url, headers, payload):
+            seen["url"] = url
+            seen["model"] = payload["model"]
+            seen["auth"] = headers.get("Authorization")
+            return {"choices": [{"message": {"content": "{}"}}]}
+
+        monkeypatch.setattr(llm, "_post_json", fake_post)
+
+        async with llm.using(test_db, str(alice.id), "capture"):
+            config = await llm.config_for_role("capture")
+            await llm.chat_json(config, [{"role": "user", "content": "hi"}])
+
+        assert seen["model"] == "gpt-4o-mini"
+        assert seen["auth"] == "Bearer sk-alice"
+        assert seen["url"] == "https://api.openai.com/v1/chat/completions"
+
+    @pytest.mark.asyncio
+    async def test_another_user_does_not_get_that_config(
+        self, client, setup_users, auth, test_db
+    ):
+        alice, bob = await setup_users()
+        headers = auth("alice", "password123")
+        client.put(
+            "/api/settings/llm/capture",
+            json={"provider": "openai", "model": "gpt-4o-mini"},
+            headers=headers,
+        )
+
+        from app.agents import llm
+
+        async with llm.using(test_db, str(bob.id), "capture"):
+            config = await llm.config_for_role("capture")
+
+        assert config.model != "gpt-4o-mini"
+
+
 class TestPerUser:
     @pytest.mark.asyncio
     async def test_one_users_setting_is_not_anothers(
@@ -255,9 +317,22 @@ class TestPerUser:
         assert response.status_code in (401, 403)
 
 
-class TestEmbeddingsAreLocked:
+class TestEmbeddingsAreNotConfigurable:
     @pytest.mark.asyncio
-    async def test_the_embedding_model_cannot_be_changed(
+    async def test_embedding_is_not_an_offered_role(
+        self, client, setup_users, auth
+    ):
+        await setup_users()
+        headers = auth("alice", "password123")
+
+        entries = client.get("/api/settings/llm", headers=headers).json()
+
+        # Every stored vector was made by one model; pointing embeddings
+        # elsewhere would break search rather than improve it.
+        assert "embedding" not in {entry["role"] for entry in entries}
+
+    @pytest.mark.asyncio
+    async def test_the_embedding_role_cannot_be_set(
         self, client, setup_users, auth
     ):
         await setup_users()
@@ -269,22 +344,4 @@ class TestEmbeddingsAreLocked:
             headers=headers,
         )
 
-        # Stored vectors were made by one model; a different one produces
-        # vectors that compare meaninglessly.
-        assert response.status_code == 400
-
-    @pytest.mark.asyncio
-    async def test_the_embedding_key_can_still_be_set(
-        self, client, setup_users, auth
-    ):
-        await setup_users()
-        headers = auth("alice", "password123")
-
-        response = client.put(
-            "/api/settings/llm/embedding",
-            json={"api_key": "sk-embed"},
-            headers=headers,
-        )
-
-        assert response.status_code == 200
-        assert response.json()["has_api_key"] is True
+        assert response.status_code == 404

@@ -21,30 +21,14 @@ def _ollama_config() -> tuple[str, str, Optional[str]]:
 
 
 async def _call_ollama_embeddings(text: str) -> list[float]:
-    """Call the Ollama embeddings API and return the embedding vector."""
-    api_base, model, api_key = _ollama_config()
-    url = f"{api_base}/v1/embeddings"
+    """Return the embedding vector for one piece of text.
 
-    headers = {
-        "Content-Type": "application/json",
-        "Accept": "application/json",
-    }
-    if api_key:
-        headers["Authorization"] = f"Bearer {api_key}"
+    The embedding model is fixed: every stored vector was made by one model, so
+    the per-user setting may supply a key but not a different model.
+    """
+    from app.agents import llm
 
-    payload = {
-        "model": model,
-        "input": text,
-    }
-
-    async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT_SECONDS) as client:
-        response = await client.post(url, headers=headers, json=payload)
-        response.raise_for_status()
-        data = response.json()
-
-    # Ollama embeddings endpoint returns embedding in data[0].embedding.
-    embedding = data["data"][0]["embedding"]
-    return [float(x) for x in embedding]
+    return await llm.embed(await llm.config_for_role("embedding"), text)
 
 
 async def generate_embedding(text: str) -> list[float]:

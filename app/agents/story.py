@@ -6,6 +6,8 @@ from typing import Optional
 
 import httpx
 
+from app.llm_config import LLMConfig
+
 DEFAULT_OLLAMA_API_BASE = "https://api.ollama.com"
 DEFAULT_OLLAMA_MODEL = "gemma4:31b"
 DEFAULT_CLAUDE_MODEL = "claude-3-opus-20240229"
@@ -56,67 +58,35 @@ def _claude_config() -> tuple[Optional[str], str]:
 
 
 async def _call_ollama_chat(messages: list[dict[str, str]]) -> dict:
-    """Call the Ollama Chat API and return parsed JSON content."""
-    api_base, model, api_key = _ollama_config()
-    url = f"{api_base}/v1/chat/completions"
+    """Run the story prompt through the configured provider."""
+    from app.agents import llm
 
-    headers = {
-        "Content-Type": "application/json",
-        "Accept": "application/json",
-    }
-    if api_key:
-        headers["Authorization"] = f"Bearer {api_key}"
-
-    payload = {
-        "model": model,
-        "messages": messages,
-        "response_format": {"type": "json_object"},
-        "stream": False,
-    }
-
-    async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT_SECONDS) as client:
-        response = await client.post(url, headers=headers, json=payload)
-        response.raise_for_status()
-        data = response.json()
-
-    content = data["choices"][0]["message"]["content"]
-    return json.loads(content)
+    return await llm.chat_json(await llm.config_for_role("story"), messages)
 
 
 async def _call_claude_chat(messages: list[dict[str, str]]) -> dict:
-    """Call the Anthropic Claude API and return parsed JSON content."""
+    """The Claude fallback, for a role whose provider is not Claude.
+
+    Story generation retries with Claude when the primary model returns
+    something poor. That fallback is still Anthropic regardless of what the
+    role is pointed at, so it is built from the environment, not the role.
+    """
+    from app.agents import llm
+
     api_key, model = _claude_config()
     if not api_key:
         raise RuntimeError("ANTHROPIC_API_KEY not configured")
 
-    url = "https://api.anthropic.com/v1/messages"
-    headers = {
-        "Content-Type": "application/json",
-        "x-api-key": api_key,
-        "anthropic-version": "2023-06-01",
-    }
-
-    system_message = None
-    user_messages = messages
-    if messages and messages[0]["role"] == "system":
-        system_message = messages[0]["content"]
-        user_messages = messages[1:]
-
-    payload = {
-        "model": model,
-        "max_tokens": 2048,
-        "messages": user_messages,
-    }
-    if system_message:
-        payload["system"] = system_message
-
-    async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT_SECONDS) as client:
-        response = await client.post(url, headers=headers, json=payload)
-        response.raise_for_status()
-        data = response.json()
-
-    content = data["content"][0]["text"]
-    return json.loads(content)
+    return await llm.chat_json(
+        LLMConfig(
+            role="story",
+            provider="anthropic",
+            model=model,
+            api_base=None,
+            api_key=api_key,
+        ),
+        messages,
+    )
 
 
 def _build_story_prompt(story_type: str, memories: list[dict], custom_prompt: Optional[str]) -> str:
