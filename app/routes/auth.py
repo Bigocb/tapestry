@@ -10,6 +10,7 @@ from pydantic import BaseModel
 
 from app.db import PasswordResetToken, User, as_utc, get_db
 from app.models.schemas import (
+    ChangePasswordRequest,
     ForgotPasswordRequest,
     ResetPasswordRequest,
     TokenResponse,
@@ -25,6 +26,7 @@ from app.reset import (
     reset_link,
     reset_requests_per_hour,
 )
+from app.dependencies import get_current_user
 from app.security import (
     hash_password,
     verify_password,
@@ -144,6 +146,49 @@ async def reset_password(
     )
     for other in outstanding.scalars():
         other.used_at = now
+
+    await db.commit()
+    return {"detail": "Your password has been changed."}
+
+
+@router.post("/change-password")
+async def change_password(
+    payload: ChangePasswordRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Change the signed-in user's password, given the current one.
+
+    The current password is required even though a reset link exists: that link
+    is for a forgotten password, and this is what stops a borrowed session from
+    locking the owner out.
+    """
+    if not verify_password(payload.current_password, current_user.password_hash):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="That is not your current password.",
+        )
+
+    if payload.new_password == payload.current_password:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="That is already your password.",
+        )
+
+    current_user.password_hash = hash_password(payload.new_password)
+
+    # Any outstanding reset link was for the old password, so it no longer
+    # applies. Closing them keeps a link requested before the change from
+    # working after it.
+    outstanding = await db.execute(
+        select(PasswordResetToken).where(
+            PasswordResetToken.user_id == current_user.id,
+            PasswordResetToken.used_at.is_(None),
+        )
+    )
+    now = datetime.now(timezone.utc)
+    for token in outstanding.scalars():
+        token.used_at = now
 
     await db.commit()
     return {"detail": "Your password has been changed."}

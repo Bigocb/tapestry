@@ -679,6 +679,20 @@ class ResetPasswordRequest(BaseModel):
     new_password: str = Field(..., min_length=8)
 
 
+class ChangePasswordRequest(BaseModel):
+    """Change a password while signed in.
+
+    The current password is required even though a reset link exists: the link
+    is for a forgotten password, and requiring it here stops a borrowed session
+    from locking the owner out. The length rule matches registration.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    current_password: str = Field(..., min_length=1)
+    new_password: str = Field(..., min_length=8, max_length=255)
+
+
 # ============================================================================
 # TELLING MODELS
 # ============================================================================
