@@ -249,6 +249,11 @@ export const api = {
   // not that a session expired. Retrying through the refresh path discards any
   // stored token and reports "Session expired", hiding the server's real reason
   // — which on a phone is usually an autocapitalised username.
+  changePassword: (currentPassword: string, newPassword: string) =>
+    request("POST", "/auth/change-password", {
+      current_password: currentPassword,
+      new_password: newPassword,
+    }) as Promise<{ detail: string }>,
   forgotPassword: (identifier: string) =>
     request("POST", "/auth/forgot-password", { identifier }) as Promise<{
       detail: string;

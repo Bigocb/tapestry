@@ -16,6 +16,7 @@ import {
   MapPinIcon,
   EllipsisHorizontalIcon,
   XMarkIcon,
+  Cog6ToothIcon,
 } from "@heroicons/react/24/outline";
 
 const RAIL_ITEMS = [
@@ -26,6 +27,7 @@ const RAIL_ITEMS = [
   { href: "/stories", label: "Stories", icon: BookOpenIcon },
   { href: "/insights", label: "Insights", icon: ChartBarIcon },
   { href: "/review", label: "Review", icon: InboxIcon, badgeKey: true },
+  { href: "/settings", label: "Settings", icon: Cog6ToothIcon },
 ] as const;
 
 // The bottom bar only has room for four icons either side of the FAB, so the
@@ -138,6 +140,14 @@ export function Layout({ children }: { children: React.ReactNode }) {
         </Link>
 
         <div className="flex-1" />
+        <Link
+          href="/settings"
+          aria-label="Settings"
+          aria-current={pathname === "/settings"}
+          className={railClass(pathname === "/settings")}
+        >
+          <Cog6ToothIcon className="w-[22px] h-[22px]" />
+        </Link>
         <button
           onClick={logout}
           className="px-2 py-1.5 text-ink-faint hover:text-ink text-xs"
