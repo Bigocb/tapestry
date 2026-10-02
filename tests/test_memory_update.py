@@ -4,6 +4,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker
+from datetime import datetime, timezone
 
 from app.main import app
 from app.db import Base, User, Memory, get_db
@@ -87,6 +88,72 @@ async def _seed_memory(session, user_id, raw_input, title):
     await session.commit()
     await session.refresh(memory)
     return memory
+
+
+class TestCorrectingAFuzzyMemory:
+    """Turning a fuzzy memory into an exact one must actually stick.
+
+    The editor used to send the new date together with the old fuzzy precision,
+    so the precision was written back over the "exact" the date had just set and
+    the memory returned to its decade. The user saw their edit vanish.
+    """
+
+    @pytest.mark.asyncio
+    async def test_setting_an_exact_date_clears_a_decade_precision(
+        self, client, test_db, setup_users, get_auth_token
+    ):
+        user1, _ = await setup_users()
+        token = get_auth_token("alice", "password123")
+        memory = await _seed_memory(test_db, str(user1.id), "the 80s", "The 80s")
+        memory.event_date = datetime(1980, 1, 1, tzinfo=timezone.utc)
+        memory.date_precision = "decade"
+        memory.date_label = "1980s"
+        await test_db.commit()
+
+        # What the fixed editor sends: a coherent exact date, nothing stale.
+        response = client.patch(
+            f"/api/memories/{memory.id}",
+            json={
+                "event_date": "1988-09-17T00:00:00Z",
+                "date_precision": "exact",
+                "date_label": None,
+                "event_date_end": None,
+            },
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["date_precision"] == "exact"
+        assert data["date_label"] is None
+        assert data["event_date"].startswith("1988-09-17")
+
+    @pytest.mark.asyncio
+    async def test_a_date_with_no_precision_is_taken_as_exact(
+        self, client, test_db, setup_users, get_auth_token
+    ):
+        """A bare date means a specific day; the caller should not have to say so.
+
+        The precision is only left alone when the caller states one, because the
+        fuzzy editor sends a year anchor *with* a range precision on purpose.
+        """
+        user1, _ = await setup_users()
+        token = get_auth_token("alice", "password123")
+        memory = await _seed_memory(test_db, str(user1.id), "the 80s", "The 80s")
+        memory.date_precision = "decade"
+        memory.date_label = "1980s"
+        await test_db.commit()
+
+        response = client.patch(
+            f"/api/memories/{memory.id}",
+            json={"event_date": "1988-09-17T00:00:00Z"},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["date_precision"] == "exact"
+        assert data["date_label"] is None
 
 
 class TestMemoryUpdate:

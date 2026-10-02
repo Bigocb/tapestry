@@ -991,8 +991,13 @@ async def update_memory(
             # Explicitly cleared.
             memory.event_date = None
 
+    # A caller that states a precision has the last word — the fuzzy editor
+    # sends a year anchor alongside "range"/"decade" on purpose. A caller that
+    # sends only a date meant a specific day.
     if update.date_precision is not None:
         memory.date_precision = update.date_precision
+    elif update.event_date is not None and "event_date" in provided:
+        memory.date_precision = "exact"
 
     if "event_date_end" in provided:
         memory.event_date_end = update.event_date_end
