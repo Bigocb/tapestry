@@ -37,6 +37,13 @@ services:
       SESSION_IDLE_MINUTES: ${SESSION_IDLE_MINUTES:-15}
       SESSION_IDLE_WARNING_SECONDS: ${SESSION_IDLE_WARNING_SECONDS:-60}
       WHISPER_MODEL: ${WHISPER_MODEL:-base}
+      # Outbound email for password-reset links. With no SMTP_HOST the link is
+      # written to the log instead; see app/reset.py.
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM: ${SMTP_FROM:-}
       TZ: ${TZ:-America/New_York}
     volumes:
       - memind-whisper:/root/.cache/huggingface
