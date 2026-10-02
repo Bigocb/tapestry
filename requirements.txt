@@ -20,5 +20,7 @@ email-validator==2.1.0
 markdown==3.10.2
 python-frontmatter==1.3.0
 apscheduler==3.10.4
+# Encrypts per-user LLM provider API keys at rest.
+cryptography==43.0.3
 # Local voice transcription. Model weights download on first use.
 faster-whisper==1.2.1

@@ -23,6 +23,19 @@ from app.security import hash_password
 TEST_DATABASE_URL = "sqlite+aiosqlite:///:memory:"
 
 
+@pytest.fixture(autouse=True)
+def _no_smtp(monkeypatch):
+    """Force the log path regardless of the host's environment.
+
+    With SMTP configured the link is emailed, not logged, and these tests read
+    it from the log. A developer's or the deployed .env must not change what the
+    suite proves.
+    """
+    monkeypatch.delenv("SMTP_HOST", raising=False)
+    monkeypatch.delenv("SMTP_USER", raising=False)
+    monkeypatch.delenv("SMTP_PASSWORD", raising=False)
+
+
 @pytest.fixture
 async def test_db():
     from sqlalchemy.pool import StaticPool

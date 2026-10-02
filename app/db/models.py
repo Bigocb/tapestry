@@ -93,6 +93,9 @@ class User(Base):
         "Entity", back_populates="user", cascade="all, delete-orphan"
     )
     stories = relationship("Story", back_populates="user", cascade="all, delete-orphan")
+    llm_settings = relationship(
+        "LLMSetting", back_populates="user", cascade="all, delete-orphan"
+    )
 
 
 class Memory(Base):
@@ -543,4 +546,43 @@ class TellingSegment(Base):
         Index("idx_telling_segments_telling", "telling_id", "ordinal"),
         Index("idx_telling_segments_user", "user_id"),
         Index("idx_telling_segments_memory", "memory_id"),
+    )
+
+
+class LLMSetting(Base):
+    """One user's provider choice for one agent role.
+
+    Settings are per user, so one person can point capture at a local model
+    while another uses a hosted one, each with their own key. A missing role
+    falls back to the environment default.
+
+    The API key is stored encrypted and never returned. Embeddings are locked:
+    the stored vectors were made by one model, and a different one produces
+    vectors that compare meaninglessly, so only the key is settable there.
+    """
+
+    __tablename__ = "llm_settings"
+
+    id = Column(GUID(), primary_key=True, default=uuid.uuid4)
+    user_id = Column(
+        GUID(), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+
+    # capture | refinement | enrichment | search | telling | story | embedding
+    role = Column(String(30), nullable=False)
+    provider = Column(String(40), nullable=False, default="ollama")
+    model = Column(String(120), nullable=False, default="")
+    # Overrides the provider's default endpoint, for a self-hosted model.
+    api_base = Column(String(255), nullable=True)
+    api_key_encrypted = Column(Text, nullable=True)
+
+    created_at = Column(TIMESTAMP, server_default=func.now(), nullable=False)
+    updated_at = Column(
+        TIMESTAMP, server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+    user = relationship("User", back_populates="llm_settings")
+
+    __table_args__ = (
+        Index("idx_llm_settings_user_role", "user_id", "role", unique=True),
     )

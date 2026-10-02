@@ -22,6 +22,7 @@ from app.routes import (
     review,
     entities,
     tellings,
+    settings,
 )
 from app.jobs.scheduler import scheduler
 from app.db import Base, engine
@@ -528,6 +529,7 @@ app.include_router(insights.router, prefix="/api", tags=["insights"])
 app.include_router(review.router, prefix="/api", tags=["review"])
 app.include_router(entities.router, prefix="/api", tags=["entities"])
 app.include_router(tellings.router, prefix="/api", tags=["tellings"])
+app.include_router(settings.router, prefix="/api", tags=["settings"])
 app.include_router(wiki.router, prefix="/api", tags=["wiki"])
 
 

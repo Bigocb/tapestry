@@ -96,6 +96,17 @@ def propose(label, precision, event_date, event_end):
     """What this row's (precision, start, end, label) should be, or None."""
     period = label_period(label)
     if period is None:
+        # No usable label. A placeholder precision sitting on a real day is the
+        # precision that is wrong: the day is the more specific truth. This is
+        # the shape a date lands in when an exact date was set but the old
+        # editor left a stale "decade" beside it. Nothing is read from the raw
+        # text — only the date the row already stores.
+        if (
+            precision in ("month", "year", "decade", "range")
+            and event_date is not None
+            and event_date.day != 1
+        ):
+            return ("exact", event_date, event_end, None)
         return None
 
     kind, start, end = period

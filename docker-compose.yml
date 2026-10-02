@@ -44,6 +44,9 @@ services:
       SMTP_USER: ${SMTP_USER:-}
       SMTP_PASSWORD: ${SMTP_PASSWORD:-}
       SMTP_FROM: ${SMTP_FROM:-}
+      # Encrypts per-user provider API keys at rest. Required once anyone saves
+      # a key in Settings; without it, saving a key is refused.
+      SECRET_ENCRYPTION_KEY: ${SECRET_ENCRYPTION_KEY:-}
       TZ: ${TZ:-America/New_York}
     volumes:
       - memind-whisper:/root/.cache/huggingface

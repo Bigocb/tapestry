@@ -679,6 +679,38 @@ class ResetPasswordRequest(BaseModel):
     new_password: str = Field(..., min_length=8)
 
 
+class LLMProviderSetting(BaseModel):
+    """One agent role's provider choice, as the client may see it.
+
+    The API key is deliberately absent — only whether one is set. A key that
+    has been entered should never travel back to a browser.
+    """
+
+    role: str
+    provider: str
+    model: str
+    api_base: Optional[str] = None
+    has_api_key: bool = False
+    # True for embeddings, whose model is fixed until re-embedding exists.
+    # Named "locked_model" rather than "model_locked": Pydantic reserves the
+    # "model_" prefix for its own methods.
+    locked_model: bool = False
+
+
+class LLMProviderSettingUpdate(BaseModel):
+    """A change to one role's provider settings.
+
+    Omitted fields are left alone; an empty ``api_key`` clears the stored one.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    provider: Optional[str] = Field(None, max_length=40)
+    model: Optional[str] = Field(None, max_length=120)
+    api_base: Optional[str] = Field(None, max_length=255)
+    api_key: Optional[str] = Field(None, max_length=500)
+
+
 class ChangePasswordRequest(BaseModel):
     """Change a password while signed in.
 

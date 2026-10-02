@@ -90,11 +90,25 @@ class TestPropose:
             datetime(1983, 12, 30),
         ) == ("decade", datetime(1980, 1, 1), datetime(1983, 12, 30), None)
 
-    def test_a_row_with_no_usable_label_is_left_alone(self):
-        # Nothing is read out of the raw text: prose mentions periods for other
-        # reasons ("Ryan's 70s Dodge Dart"), and re-reading it moved rows to the
-        # wrong decade.
-        assert propose("", "decade", datetime(1988, 9, 17), None) is None
+    def test_a_decade_precision_on_a_real_day_becomes_exact(self):
+        # An exact date set while the old editor left a stale "decade" beside
+        # it. The day is the more specific truth.
+        assert propose("", "decade", datetime(1988, 9, 17), None) == (
+            "exact",
+            datetime(1988, 9, 17),
+            None,
+            None,
+        )
+
+    def test_a_placeholder_precision_on_the_first_is_left_alone(self):
+        # 1 Jan is exactly how a bare year/decade is stored; nothing to fix.
+        assert propose("", "decade", datetime(1980, 1, 1), None) is None
+        assert propose("", "year", datetime(1988, 1, 1), None) is None
+
+    def test_nothing_is_read_out_of_the_raw_text(self):
+        # Prose mentions periods for other reasons ("Ryan's 70s Dodge Dart"),
+        # so a label-less row with a placeholder date is left for the user.
+        assert propose("", "decade", datetime(1994, 1, 1), None) is None
 
     def test_a_name_with_no_date_is_left_alone(self):
         assert propose("Middle school", "unknown", None, None) is None

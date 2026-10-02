@@ -14,6 +14,7 @@ from .models import (
     PasswordResetToken,
     Telling,
     TellingSegment,
+    LLMSetting,
 )
 from .datetime_utils import as_utc
 
@@ -35,5 +36,6 @@ __all__ = [
     "PasswordResetToken",
     "Telling",
     "TellingSegment",
+    "LLMSetting",
     "as_utc",
 ]
