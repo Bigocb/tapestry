@@ -373,14 +373,31 @@ export function MemoryEditor({ id }: { id: string }) {
                     ? new Date(memory.event_date).toISOString().slice(0, 16)
                     : ""
                 }
-                onChange={(e) =>
-                  update(
-                    "event_date",
-                    e.target.value
-                      ? new Date(e.target.value).toISOString()
-                      : undefined
-                  )
-                }
+                onChange={(e) => {
+                  const value = e.target.value;
+                  setMemory((current) => {
+                    if (!current) return null;
+                    if (!value) {
+                      return {
+                        ...current,
+                        event_date: undefined,
+                        date_precision: undefined,
+                        date_label: undefined,
+                        event_date_end: undefined,
+                      };
+                    }
+                    // A precise date supersedes any fuzzy period. Leaving the
+                    // old label or a stale "decade" precision behind sent the
+                    // memory straight back to where it was.
+                    return {
+                      ...current,
+                      event_date: new Date(value).toISOString(),
+                      date_precision: "exact",
+                      date_label: undefined,
+                      event_date_end: undefined,
+                    };
+                  });
+                }}
               />
             ) : (
               <div className="space-y-3 border border-line rounded-lg p-3 bg-bg-raised">
